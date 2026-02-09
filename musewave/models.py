@@ -1,37 +1,45 @@
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
+from django.utils import timezone
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, URLValidator
 from django.utils import timezone
 import uuid
 
 
-class User(models.Model):
+class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
     username = models.CharField(max_length=30, unique=True)
     email = models.EmailField(unique=True)
-    password = models.CharField(max_length=255)  # Store hashed passwords
+
     display_name = models.CharField(max_length=100, blank=True, null=True)
     bio = models.TextField(max_length=500, blank=True, null=True)
+
     avatar_url = models.URLField(blank=True, null=True)
     header_url = models.URLField(blank=True, null=True)
+
     location = models.CharField(max_length=100, blank=True, null=True)
     website = models.URLField(blank=True, null=True)
-    
-    # Social links stored as JSON
+
     twitter = models.CharField(max_length=100, blank=True, null=True)
     instagram = models.CharField(max_length=100, blank=True, null=True)
     spotify = models.CharField(max_length=100, blank=True, null=True)
     soundcloud = models.CharField(max_length=100, blank=True, null=True)
-    
+
     verified = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+
+    is_active = models.BooleanField(default=True)
+    is_staff = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta:
-        db_table = 'users'
-        ordering = ['-created_at']
+    USERNAME_FIELD = "email"
+    REQUIRED_FIELDS = ["username"]
 
-    def __str__(self):
-        return self.username
+    class Meta:
+        db_table = "users"
+
 
 
 class Album(models.Model):
