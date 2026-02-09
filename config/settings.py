@@ -150,6 +150,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Custom settings
 DB_DATA_DIR = BASE_DIR / 'db-data'
+AUTH_USER_MODEL = 'users.User'
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:
