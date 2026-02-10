@@ -3,8 +3,9 @@ Authentication Serializers for MuseWave API
 Handles login, password change, and password reset functionality
 """
 
+from django.db.models import Q
 from rest_framework import serializers
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from musewave.models import User
@@ -14,63 +15,57 @@ from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 
 
+
+User = get_user_model()
+
+
 class LoginSerializer(serializers.Serializer):
     """
-    Serializer for user login
-    Accepts either username or email along with password
+    Login serializer supporting username OR email
     """
+
     username_or_email = serializers.CharField(required=True)
     password = serializers.CharField(
         required=True,
         write_only=True,
-        style={'input_type': 'password'}
+        style={"input_type": "password"},
     )
-    
+
     def validate(self, attrs):
-        username_or_email = attrs.get('username_or_email')
-        password = attrs.get('password')
-        
+
+        username_or_email = attrs.get("username_or_email")
+        password = attrs.get("password")
+
         if not username_or_email or not password:
             raise serializers.ValidationError(
-                _('Must include username/email and password')
+                _("Must include username/email and password")
             )
-        
-        # Try to find user by username or email
-        user = None
-        
-        # Check if it's an email
-        if '@' in username_or_email:
-            try:
-                user = User.objects.get(email=username_or_email)
-            except User.DoesNotExist:
-                pass
-        else:
-            # Try username
-            try:
-                user = User.objects.get(username=username_or_email)
-            except User.DoesNotExist:
-                pass
-        
-        # Authenticate user
-        if user:
-            # Use Django's authenticate with the actual username
-            authenticated_user = authenticate(
-                username=user.email,  # Your User model uses email as USERNAME_FIELD
-                password=password
-            )
-            
-            if authenticated_user:
-                if not authenticated_user.is_active:
-                    raise serializers.ValidationError(
-                        _('User account is disabled')
-                    )
-                attrs['user'] = authenticated_user
-                return attrs
-        
-        # Generic error message for security
-        raise serializers.ValidationError(
-            _('Invalid credentials')
+
+        # Single Query to find user by username OR email (case-insensitive)
+        user = User.objects.filter(
+            Q(username=username_or_email) |
+            Q(email=username_or_email)
+        ).first()
+
+        if not user:
+            raise serializers.ValidationError(_("Invalid credentials"))
+
+        # SAFE AUTHENTICATION (Works With Custom USERNAME_FIELD)
+        authenticated_user = authenticate(
+            request=self.context.get("request"),
+            username=user.get_username(),
+            password=password
         )
+
+        if not authenticated_user:
+            raise serializers.ValidationError(_("Invalid credentials"))
+
+        # TODO: Implement this when email verification and account activation is added
+        # if not authenticated_user.is_active:
+        #     raise serializers.ValidationError(_("User account is disabled"))
+
+        attrs["user"] = authenticated_user
+        return attrs
 
 
 class UserDetailSerializer(serializers.ModelSerializer):
