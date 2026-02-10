@@ -1,7 +1,19 @@
 from django.urls import path, re_path
 from . import views
+from . import auth_views
 
 urlpatterns = [
+    # Authentication
+    path('users/login', auth_views.login_view, name='login'),
+    path('users/logout', auth_views.logout_view, name='logout'),
+    path('users/refresh', auth_views.token_refresh_view, name='token_refresh'),
+    path('users/verify-token', auth_views.verify_token_view, name='verify_token'),
+    
+    # Password management
+    path('users/password/change', auth_views.change_password_view, name='change_password'),
+    path('users/password/reset', auth_views.password_reset_request_view, name='password_reset_request'),
+    path('users/password/reset/confirm', auth_views.password_reset_confirm_view, name='password_reset_confirm'),
+
     # Users - Order matters! More specific routes first
     path('users/username/<str:username>', views.get_user_by_username, name='get_user_by_username'),
     path('users', views.users_list_or_create, name='users_list_or_create'),  # GET/POST
