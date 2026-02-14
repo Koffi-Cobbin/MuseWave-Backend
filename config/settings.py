@@ -189,6 +189,12 @@ if ON_PYTHONANYWHERE:
 else:
     MEDIA_ROOT = BASE_DIR / 'media'
 
+
+# File upload limits
+FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
+
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -211,7 +217,8 @@ else:
     # In production, specify exact origins
     CORS_ALLOWED_ORIGINS = [
         'https://kofficobbin.pythonanywhere.com',
-        # Add your frontend domain here if different
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
 
 CORS_ALLOW_CREDENTIALS = True

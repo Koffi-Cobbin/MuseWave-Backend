@@ -56,6 +56,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
 class AlbumSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(source='user.id', read_only=True)
     track_count = serializers.SerializerMethodField()
+    cover_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Album
@@ -68,26 +69,41 @@ class AlbumSerializer(serializers.ModelSerializer):
     
     def get_track_count(self, obj):
         return obj.tracks.count()
+    
+    def get_cover_url(self, obj):
+        if obj.cover_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.cover_file.url)
+            return obj.cover_file.url
+        return None
 
 
 class CreateAlbumSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(write_only=True)
-    track_ids = serializers.ListField(
-        child=serializers.UUIDField(),
-        write_only=True,
-        required=False
-    )
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    track_ids = serializers.JSONField(write_only=True, required=False)
     
     class Meta:
         model = Album
         fields = [
             'user_id', 'title', 'artist', 'description',
-            'cover_url', 'cover_gradient', 'release_date', 'genre',
+            'cover_file', 'cover_gradient', 'release_date', 'genre',
             'published', 'track_ids'
         ]
     
     def create(self, validated_data):
-        track_ids = validated_data.pop('track_ids', [])
+        # Handle track_ids (can be string or list)
+        track_ids_raw = validated_data.pop('track_ids', [])
+        if isinstance(track_ids_raw, str):
+            import json
+            try:
+                track_ids = json.loads(track_ids_raw)
+            except json.JSONDecodeError:
+                track_ids = []
+        else:
+            track_ids = track_ids_raw
+            
         user_id = validated_data.pop('user_id')
         user = User.objects.get(id=user_id)
         
@@ -103,6 +119,8 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
 class TrackSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(source='user.id', read_only=True)
     album_id = serializers.UUIDField(source='album.id', read_only=True, allow_null=True)
+    audio_url = serializers.SerializerMethodField()
+    cover_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Track
@@ -117,34 +135,70 @@ class TrackSerializer(serializers.ModelSerializer):
             'id', 'plays', 'likes', 'downloads', 'shares',
             'published_at', 'created_at', 'updated_at'
         ]
+    
+    def get_audio_url(self, obj):
+        if obj.audio_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.audio_file.url)
+            return obj.audio_file.url
+        return None
+    
+    def get_cover_url(self, obj):
+        if obj.cover_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.cover_file.url)
+            return obj.cover_file.url
+        return None
 
 
 class CreateTrackSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(write_only=True)
+    audio_file = serializers.FileField(write_only=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    tags = serializers.JSONField(required=False)
     
     class Meta:
         model = Track
         fields = [
             'user_id', 'title', 'artist', 'artist_slug', 'description',
-            'genre', 'mood', 'tags', 'audio_url', 'audio_file_size',
-            'audio_duration', 'audio_format', 'cover_url', 'cover_gradient',
+            'genre', 'mood', 'tags', 'audio_file', 'audio_file_size',
+            'audio_duration', 'audio_format', 'cover_file', 'cover_gradient',
             'waveform_data', 'bpm', 'key', 'published'
         ]
     
     def create(self, validated_data):
         user_id = validated_data.pop('user_id')
         user = User.objects.get(id=user_id)
+        
+        # Handle tags if it's a string
+        if 'tags' in validated_data and isinstance(validated_data['tags'], str):
+            import json
+            try:
+                validated_data['tags'] = json.loads(validated_data['tags'])
+            except json.JSONDecodeError:
+                validated_data['tags'] = []
+        
+        # Set published_at if published is True
+        if validated_data.get('published', False):
+            from django.utils import timezone
+            validated_data['published_at'] = timezone.now()
+        
         track = Track.objects.create(user=user, **validated_data)
         return track
 
 
 class UpdateTrackSerializer(serializers.ModelSerializer):
+    audio_file = serializers.FileField(required=False)
+    cover_file = serializers.ImageField(required=False, allow_null=True)
+    
     class Meta:
         model = Track
         fields = [
             'title', 'artist', 'artist_slug', 'description', 'genre', 'mood',
-            'tags', 'audio_url', 'audio_file_size', 'audio_duration',
-            'audio_format', 'cover_url', 'cover_gradient', 'waveform_data',
+            'tags', 'audio_file', 'audio_file_size', 'audio_duration',
+            'audio_format', 'cover_file', 'cover_gradient', 'waveform_data',
             'bpm', 'key', 'published'
         ]
     
@@ -153,6 +207,14 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
         if 'published' in validated_data and validated_data['published'] and not instance.published:
             from django.utils import timezone
             instance.published_at = timezone.now()
+        
+        # Handle tags if it's a string
+        if 'tags' in validated_data and isinstance(validated_data['tags'], str):
+            import json
+            try:
+                validated_data['tags'] = json.loads(validated_data['tags'])
+            except json.JSONDecodeError:
+                pass
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

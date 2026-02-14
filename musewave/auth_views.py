@@ -138,6 +138,8 @@ def login_view(request):
             status=status.HTTP_429_TOO_MANY_REQUESTS
         )
     
+    print("Request Data:", request.data)  # Debugging line
+
     # Validate credentials
     serializer = LoginSerializer(data=request.data)
     

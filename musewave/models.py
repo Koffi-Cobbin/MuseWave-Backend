@@ -84,7 +84,7 @@ class Album(models.Model):
     title = models.CharField(max_length=200)
     artist = models.CharField(max_length=200)
     description = models.TextField(max_length=2000, blank=True, null=True)
-    cover_url = models.URLField(blank=True, null=True)
+    cover_file = models.ImageField(upload_to='albums/covers/%Y/%m/', blank=True, null=True)
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
     release_date = models.DateTimeField()
     genre = models.CharField(max_length=50)
@@ -113,12 +113,12 @@ class Track(models.Model):
     tags = models.JSONField(default=list, blank=True)
     
     # File information
-    audio_url = models.URLField()
+    audio_file = models.FileField(upload_to='tracks/audio/%Y/%m/')
     audio_file_size = models.BigIntegerField()  # bytes
     audio_duration = models.FloatField()  # seconds
     audio_format = models.CharField(max_length=20)  # mp3, wav, etc.
     
-    cover_url = models.URLField(blank=True, null=True)
+    cover_file = models.ImageField(upload_to='tracks/covers/%Y/%m/', blank=True, null=True)
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
     waveform_data = models.TextField(blank=True, null=True)  # JSON string
     

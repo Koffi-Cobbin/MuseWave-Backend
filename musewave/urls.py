@@ -39,6 +39,9 @@ urlpatterns = [
     
     # Tracks
     path('tracks', views.tracks_list_or_create, name='tracks_list_or_create'),  # GET/POST
+    path('tracks/<uuid:track_id>/stream/', views.stream_track, name='stream_track'),  # GET
+    path('tracks/<uuid:track_id>/stream-url/', views.get_track_stream_url, name='get_track_stream_url'),  # GET
+    path('tracks/<uuid:track_id>/download/', views.download_track, name='download_track'),  # GET
     path('tracks/<uuid:track_id>/stats', views.get_track_stats, name='get_track_stats'),
     path('tracks/<uuid:track_id>/like', views.like_track, name='like_track'),  # POST/DELETE
     path('tracks/<uuid:track_id>/like/<uuid:user_id>', views.check_like, name='check_like'),

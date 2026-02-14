@@ -1,10 +1,14 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
+from django.http import FileResponse, StreamingHttpResponse, HttpResponse
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from datetime import timedelta
+import os
+import mimetypes
 
 from .models import User, Track, Like, Download, Play, Follow, Album
 from .serializers import (
@@ -220,6 +224,7 @@ def get_artists(request):
 # ============================================================================
 
 @api_view(['GET', 'POST'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def tracks_list_or_create(request):
     """Handle both listing tracks and creating new tracks"""
     if request.method == 'GET':
@@ -262,24 +267,25 @@ def tracks_list_or_create(request):
         offset = int(request.GET.get('offset', 0))
         tracks = tracks[offset:offset + limit]
         
-        serializer = TrackSerializer(tracks, many=True)
+        serializer = TrackSerializer(tracks, many=True, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'POST':
         serializer = CreateTrackSerializer(data=request.data)
         if serializer.is_valid():
             track = serializer.save()
-            track_data = TrackSerializer(track).data
+            track_data = TrackSerializer(track, context={'request': request}).data
             return Response(track_data, status=status.HTTP_201_CREATED)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST', 'GET', 'PATCH', 'DELETE'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def track_detail(request, track_id):
     """Combined endpoint for all track operations"""
     if request.method == 'GET':
         track = get_object_or_404(Track, id=track_id)
-        serializer = TrackSerializer(track)
+        serializer = TrackSerializer(track, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'PATCH':
@@ -287,7 +293,7 @@ def track_detail(request, track_id):
         serializer = UpdateTrackSerializer(track, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            track_data = TrackSerializer(track).data
+            track_data = TrackSerializer(track, context={'request': request}).data
             return Response(track_data)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
     
@@ -458,7 +464,7 @@ def get_following(request, user_id):
 def get_user_albums(request, user_id):
     """Get all albums for a user"""
     albums = Album.objects.filter(user_id=user_id)
-    serializer = AlbumSerializer(albums, many=True)
+    serializer = AlbumSerializer(albums, many=True, context={'request': request})
     return Response(serializer.data)
 
 
@@ -468,19 +474,20 @@ def get_album(request, album_id):
     album = get_object_or_404(Album, id=album_id)
     tracks = Track.objects.filter(album=album)
     
-    album_data = AlbumSerializer(album).data
-    album_data['tracks'] = TrackSerializer(tracks, many=True).data
+    album_data = AlbumSerializer(album, context={'request': request}).data
+    album_data['tracks'] = TrackSerializer(tracks, many=True, context={'request': request}).data
     
     return Response(album_data)
 
 
 @api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def create_album(request):
     """Create a new album"""
     serializer = CreateAlbumSerializer(data=request.data)
     if serializer.is_valid():
         album = serializer.save()
-        album_data = AlbumSerializer(album).data
+        album_data = AlbumSerializer(album, context={'request': request}).data
         return Response(album_data, status=status.HTTP_201_CREATED)
     return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -555,3 +562,139 @@ def rebuild_search_index(request):
     # In Django, we don't need to rebuild an index as searches are done in real-time
     # This endpoint exists for API compatibility
     return Response({'success': True})
+
+
+# ============================================================================
+# AUDIO STREAMING AND DOWNLOAD
+# ============================================================================
+
+@api_view(['GET'])
+def stream_track(request, track_id):
+    """
+    Stream audio with support for range requests (seeking).
+    This allows the audio player to seek to different positions in the track.
+    """
+    track = get_object_or_404(Track, id=track_id)
+    
+    if not track.audio_file:
+        return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    try:
+        file_path = track.audio_file.path
+        file_size = os.path.getsize(file_path)
+        
+        # Get range header for seeking support
+        range_header = request.META.get('HTTP_RANGE', '').strip()
+        
+        if range_header:
+            # Parse range header (e.g., "bytes=0-1023")
+            import re
+            range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
+            
+            if range_match:
+                start = int(range_match.group(1))
+                end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+                length = end - start + 1
+                
+                # Open file and seek to start position
+                with open(file_path, 'rb') as audio_file:
+                    audio_file.seek(start)
+                    data = audio_file.read(length)
+                
+                # Return partial content (206)
+                response = HttpResponse(
+                    data,
+                    status=206,
+                    content_type=track.audio_format or 'audio/mpeg'
+                )
+                response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+                response['Accept-Ranges'] = 'bytes'
+                response['Content-Length'] = length
+                response['Cache-Control'] = 'public, max-age=31536000'
+                
+                return response
+        
+        # No range request - return full file
+        response = FileResponse(
+            open(file_path, 'rb'),
+            content_type=track.audio_format or 'audio/mpeg'
+        )
+        response['Content-Length'] = file_size
+        response['Accept-Ranges'] = 'bytes'
+        response['Cache-Control'] = 'public, max-age=31536000'
+        
+        return response
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def download_track(request, track_id):
+    """
+    Download track as an attachment.
+    Increments the download count and logs the download.
+    """
+    track = get_object_or_404(Track, id=track_id)
+    
+    if not track.audio_file:
+        return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    try:
+        file_path = track.audio_file.path
+        
+        # Increment download count
+        track.downloads += 1
+        track.save(update_fields=['downloads'])
+        
+        # Log the download
+        user = request.user if request.user.is_authenticated else None
+        ip_address = request.META.get('REMOTE_ADDR')
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+        
+        Download.objects.create(
+            user=user,
+            track=track,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        
+        # Determine filename
+        filename = f"{track.artist} - {track.title}.{track.audio_format or 'mp3'}"
+        
+        # Return file as attachment
+        response = FileResponse(
+            open(file_path, 'rb'),
+            content_type='application/octet-stream',
+            as_attachment=True,
+            filename=filename
+        )
+        
+        return response
+        
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+def get_track_stream_url(request, track_id):
+    """
+    Get the streaming URL for a track.
+    This is useful for the frontend to get the URL without actually streaming.
+    """
+    track = get_object_or_404(Track, id=track_id)
+    
+    if not track.audio_file:
+        return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+    # Build absolute URL for streaming
+    stream_url = request.build_absolute_uri(f'/api/tracks/{track_id}/stream/')
+    
+    return Response({
+        'id': str(track.id),
+        'title': track.title,
+        'artist': track.artist,
+        'stream_url': stream_url,
+        'duration': track.audio_duration,
+        'format': track.audio_format
+    })
