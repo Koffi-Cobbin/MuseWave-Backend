@@ -51,7 +51,7 @@ def users_list_or_create(request):
     elif request.method == 'POST':
         serializer = CreateUserSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
+            user = serializer.save()  # ✅ This calls the create() method we added!
             user_data = UserSerializer(user).data
             return Response(user_data, status=status.HTTP_201_CREATED)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)

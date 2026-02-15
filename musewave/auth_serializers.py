@@ -37,6 +37,9 @@ class LoginSerializer(serializers.Serializer):
         username_or_email = attrs.get("username_or_email")
         password = attrs.get("password")
 
+        print("Username_or_email ", username_or_email)
+        print("Password ", password)
+
         if not username_or_email or not password:
             raise serializers.ValidationError(
                 _("Must include username/email and password")
@@ -61,9 +64,8 @@ class LoginSerializer(serializers.Serializer):
         if not authenticated_user:
             raise serializers.ValidationError(_("Invalid credentials"))
 
-        # TODO: Implement this when email verification and account activation is added
-        # if not authenticated_user.is_active:
-        #     raise serializers.ValidationError(_("User account is disabled"))
+        if not authenticated_user.is_active:
+            raise serializers.ValidationError(_("User account is disabled"))
 
         attrs["user"] = authenticated_user
         return attrs

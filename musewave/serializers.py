@@ -51,6 +51,14 @@ class CreateUserSerializer(serializers.ModelSerializer):
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("Email already registered")
         return value
+    
+    def create(self, validated_data):
+        """Override create to properly hash the password"""
+        password = validated_data.pop('password')
+        user = User(**validated_data)
+        user.set_password(password)  # This hashes the password
+        user.save()
+        return user
 
 
 class AlbumSerializer(serializers.ModelSerializer):
