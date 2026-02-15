@@ -1,4 +1,9 @@
 from rest_framework import serializers
+from django.core.mail import send_mail
+from django.conf import settings
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
 from .models import User, Track, Like, Download, Play, Follow, Playlist, Comment, Album
 
 
@@ -53,12 +58,85 @@ class CreateUserSerializer(serializers.ModelSerializer):
         return value
     
     def create(self, validated_data):
-        """Override create to properly hash the password"""
+        """Override create to properly hash the password and send verification email"""
+        # Store the plain password temporarily for later use
         password = validated_data.pop('password')
+        
+        # Create user with hashed password
         user = User(**validated_data)
-        user.set_password(password)  # This hashes the password
+        user.set_password(password)
+        user.is_active = True  # Allow login but not verified
+        user.verified = False  # Mark as not verified
         user.save()
+        
+        # Store plain password temporarily in user object (for email after verification)
+        # In production, you might want to use a more secure method
+        user._plain_password = password  # Temporary attribute
+        
+        # Send verification email
+        self.send_verification_email(user)
+        
         return user
+    
+    def send_verification_email(self, user):
+        """Send email verification link to new user"""
+        try:
+            # Generate verification token
+            token = default_token_generator.make_token(user)
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            
+            # Create verification link
+            verification_url = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
+            
+            subject = 'Verify Your MuseWave Account'
+            
+            message = f"""
+Hello {user.display_name or user.username}!
+
+Thank you for registering with MuseWave!
+
+To complete your registration and activate your account, please verify your email address by clicking the link below:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERIFY YOUR EMAIL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{verification_url}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This link will expire in 24 hours.
+
+After verification, you'll receive your login credentials and can start:
+• Uploading and sharing your music tracks
+• Discovering new artists and music
+• Creating playlists and albums
+• Connecting with other music lovers
+• Tracking your music analytics
+
+If you didn't create this account, please ignore this email.
+
+Best regards,
+The MuseWave Team
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+This is an automated message. Please do not reply to this email.
+            """
+            
+            # Send email
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            
+            print(f"✅ Verification email sent to {user.email}")
+            
+        except Exception as e:
+            # Log error but don't fail user creation
+            print(f"❌ Failed to send verification email to {user.email}: {str(e)}")
 
 
 class AlbumSerializer(serializers.ModelSerializer):

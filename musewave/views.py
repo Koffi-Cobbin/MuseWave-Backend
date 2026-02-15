@@ -2,6 +2,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
 from django.http import FileResponse, StreamingHttpResponse, HttpResponse
+from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
@@ -49,11 +50,34 @@ def users_list_or_create(request):
         return Response(serializer.data)
     
     elif request.method == 'POST':
+        # Store the plain password before serializer processes it
+        plain_password = request.data.get('password')
+        
         serializer = CreateUserSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()  # ✅ This calls the create() method we added!
+            # Save user and send verification email
+            user = serializer.save()
+            
+            # Cache the password for 24 hours (86400 seconds)
+            # This will be used when the user verifies their email
+            cache_key = f'user_password_{user.id}'
+            cache.set(cache_key, plain_password, 86400)  # 24 hours
+            
+            # Log user creation
+            print(f"✅ New user created: {user.username} ({user.email}) - Verification email sent")
+            print(f"📝 Password cached for 24 hours for verification process")
+            
+            # Return user data with appropriate message
             user_data = UserSerializer(user).data
-            return Response(user_data, status=status.HTTP_201_CREATED)
+            
+            response_data = {
+                **user_data,
+                'message': 'Account created successfully! Please check your email to verify your account.',
+                'verification_required': True
+            }
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
+        
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 

@@ -1,6 +1,7 @@
 from django.urls import path, re_path
 from . import views
 from . import auth_views
+from . import verification_views
 
 
 urlpatterns = [
@@ -14,6 +15,11 @@ urlpatterns = [
     path('users/password/change', auth_views.change_password_view, name='change_password'),
     path('users/password/reset', auth_views.password_reset_request_view, name='password_reset_request'),
     path('users/password/reset/confirm', auth_views.password_reset_confirm_view, name='password_reset_confirm'),
+
+    # Email Verification - NEW ENDPOINTS
+    path('users/verify-email/<str:uidb64>/<str:token>/', verification_views.verify_email, name='verify_email'),
+    path('users/resend-verification', verification_views.resend_verification_email, name='resend_verification'),
+    path('users/verification-status', verification_views.check_verification_status, name='check_verification_status'),
 
     # Users - Order matters! More specific routes first
     path('users/username/<str:username>', views.get_user_by_username, name='get_user_by_username'),
