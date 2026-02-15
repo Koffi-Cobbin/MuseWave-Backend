@@ -236,21 +236,16 @@ AUTH_USER_MODEL = 'musewave.User'
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # Production - SMTP settings (uncomment and configure for production)
-# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-# EMAIL_HOST = 'smtp.gmail.com'  # or your SMTP server
-# EMAIL_PORT = 587
-# EMAIL_USE_TLS = True
-# EMAIL_HOST_USER = 'your-email@gmail.com'
-# EMAIL_HOST_PASSWORD = 'your-app-password'
-# DEFAULT_FROM_EMAIL = 'MuseWave <noreply@musewave.com>'
-
-# For development/testing, we'll use console backend
-DEFAULT_FROM_EMAIL = 'MuseWave <noreply@musewave.com>'
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = os.environ.get("EMAIL_HOST")
+EMAIL_PORT = os.environ.get("EMAIL_PORT")
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
 
 # Frontend URL for password reset links
 FRONTEND_URL = 'http://localhost:3000'  # Update for production
-
-
 
 
 # ============================================================================
