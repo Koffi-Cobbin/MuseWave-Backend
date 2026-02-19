@@ -181,20 +181,23 @@ def follow_user(request, user_id):
 
 
 @api_view(['PATCH', 'GET'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])   # ← ADD THIS
 def get_or_update_user(request, user_id):
     """Combined endpoint for GET and PATCH on users"""
     user = get_object_or_404(User, id=user_id)
-    
+
     if request.method == 'GET':
-        serializer = UserSerializer(user)
+        serializer = UserSerializer(user, context={'request': request})
         return Response(serializer.data)
-    
+
     elif request.method == 'PATCH':
-        serializer = UserSerializer(user, data=request.data, partial=True)
+        serializer = UserSerializer(user, data=request.data, partial=True,
+                                    context={'request': request})   # ← pass context
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @api_view(['GET'])
 def get_user_stats(request, user_id):

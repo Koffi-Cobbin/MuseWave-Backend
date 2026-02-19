@@ -49,8 +49,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     display_name = models.CharField(max_length=100, blank=True, null=True)
     bio = models.TextField(max_length=500, blank=True, null=True)
 
-    avatar_url = models.URLField(blank=True, null=True)
-    header_url = models.URLField(blank=True, null=True)
+    # Changed from URLField to ImageField to support file uploads from frontend
+    avatar_file = models.ImageField(upload_to='users/avatars/%Y/%m/', blank=True, null=True)
+    header_file = models.ImageField(upload_to='users/headers/%Y/%m/', blank=True, null=True)
 
     location = models.CharField(max_length=100, blank=True, null=True)
     website = models.URLField(blank=True, null=True)

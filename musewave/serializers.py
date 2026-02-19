@@ -9,16 +9,42 @@ from .models import User, Track, Like, Download, Play, Follow, Playlist, Comment
 
 class UserSerializer(serializers.ModelSerializer):
     social_links = serializers.SerializerMethodField()
-    
+    avatar_url = serializers.SerializerMethodField()
+    header_url = serializers.SerializerMethodField()
+
+    # Accept file uploads on PATCH/PUT
+    avatar_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    header_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model = User
         fields = [
-            'id', 'username', 'email', 'display_name', 'bio', 
-            'avatar_url', 'header_url', 'location', 'website',
+            'id', 'username', 'email', 'display_name', 'bio',
+            'avatar_url', 'header_url',
+            'avatar_file', 'header_file',   # write-only upload fields
+            'location', 'website',
             'social_links', 'verified', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'verified']
-    
+
+    def get_avatar_url(self, obj):
+        """Return absolute URL for avatar image"""
+        if obj.avatar_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.avatar_file.url)
+            return obj.avatar_file.url
+        return None
+
+    def get_header_url(self, obj):
+        """Return absolute URL for header image"""
+        if obj.header_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.header_file.url)
+            return obj.header_file.url
+        return None
+
     def get_social_links(self, obj):
         return {
             'twitter': obj.twitter,
@@ -26,6 +52,20 @@ class UserSerializer(serializers.ModelSerializer):
             'spotify': obj.spotify,
             'soundcloud': obj.soundcloud,
         }
+
+    def update(self, instance, validated_data):
+        # Handle social links if sent as top-level keys
+        social_fields = ['twitter', 'instagram', 'spotify', 'soundcloud']
+        for field in social_fields:
+            if field in validated_data:
+                setattr(instance, field, validated_data.pop(field))
+
+        # Apply remaining validated data (including avatar_file / header_file)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+        return instance
 
 
 class CreateUserSerializer(serializers.ModelSerializer):
@@ -38,7 +78,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'username', 'email', 'password', 'display_name', 'bio',
-            'avatar_url', 'header_url', 'location', 'website',
+            'avatar_file', 'header_file', 'location', 'website',
             'twitter', 'instagram', 'spotify', 'soundcloud'
         ]
         extra_kwargs = {
@@ -59,21 +99,16 @@ class CreateUserSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Override create to properly hash the password and send verification email"""
-        # Store the plain password temporarily for later use
         password = validated_data.pop('password')
         
-        # Create user with hashed password
         user = User(**validated_data)
         user.set_password(password)
-        user.is_active = True  # Allow login but not verified
-        user.verified = False  # Mark as not verified
+        user.is_active = True
+        user.verified = False
         user.save()
         
-        # Store plain password temporarily in user object (for email after verification)
-        # In production, you might want to use a more secure method
-        user._plain_password = password  # Temporary attribute
+        user._plain_password = password
         
-        # Send verification email
         self.send_verification_email(user)
         
         return user
@@ -81,11 +116,9 @@ class CreateUserSerializer(serializers.ModelSerializer):
     def send_verification_email(self, user):
         """Send email verification link to new user"""
         try:
-            # Generate verification token
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             
-            # Create verification link
             verification_url = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
             
             subject = 'Verify Your MuseWave Account'
@@ -123,7 +156,6 @@ The MuseWave Team
 This is an automated message. Please do not reply to this email.
             """
             
-            # Send email
             send_mail(
                 subject=subject,
                 message=message,
@@ -135,7 +167,6 @@ This is an automated message. Please do not reply to this email.
             print(f"✅ Verification email sent to {user.email}")
             
         except Exception as e:
-            # Log error but don't fail user creation
             print(f"❌ Failed to send verification email to {user.email}: {str(e)}")
 
 
@@ -179,7 +210,6 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
         ]
     
     def create(self, validated_data):
-        # Handle track_ids (can be string or list)
         track_ids_raw = validated_data.pop('track_ids', [])
         if isinstance(track_ids_raw, str):
             import json
@@ -195,7 +225,6 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
         
         album = Album.objects.create(user=user, **validated_data)
         
-        # Associate tracks with album
         if track_ids:
             Track.objects.filter(id__in=track_ids).update(album=album)
         
@@ -258,7 +287,6 @@ class CreateTrackSerializer(serializers.ModelSerializer):
         user_id = validated_data.pop('user_id')
         user = User.objects.get(id=user_id)
         
-        # Handle tags if it's a string
         if 'tags' in validated_data and isinstance(validated_data['tags'], str):
             import json
             try:
@@ -266,7 +294,6 @@ class CreateTrackSerializer(serializers.ModelSerializer):
             except json.JSONDecodeError:
                 validated_data['tags'] = []
         
-        # Set published_at if published is True
         if validated_data.get('published', False):
             from django.utils import timezone
             validated_data['published_at'] = timezone.now()
@@ -289,12 +316,10 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
         ]
     
     def update(self, instance, validated_data):
-        # Handle published_at timestamp
         if 'published' in validated_data and validated_data['published'] and not instance.published:
             from django.utils import timezone
             instance.published_at = timezone.now()
         
-        # Handle tags if it's a string
         if 'tags' in validated_data and isinstance(validated_data['tags'], str):
             import json
             try:
