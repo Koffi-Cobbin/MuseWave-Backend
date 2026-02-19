@@ -26,18 +26,12 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'display_name', 'bio',
-            # Readable URL fields (SerializerMethodField)
             'avatar_url', 'header_url',
-            # Writable upload fields (write_only=True, never in response)
             'avatar_file', 'header_file',
             'location', 'website',
             'social_links', 'verified', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'verified']
-
-    # ------------------------------------------------------------------
-    # Build absolute URLs from the stored ImageField files
-    # ------------------------------------------------------------------
 
     def get_avatar_url(self, obj):
         if obj.avatar_file:
@@ -119,6 +113,11 @@ class CreateUserSerializer(serializers.ModelSerializer):
             token = default_token_generator.make_token(user)
             uid = urlsafe_base64_encode(force_bytes(user.pk))
 
+            # ----------------------------------------------------------------
+            # Link goes to the FRONTEND /verify-email page.
+            # The frontend reads uid + token from the URL and calls:
+            #   GET /api/users/verify-email/<uid>/<token>/
+            # ----------------------------------------------------------------
             verification_url = f"{settings.FRONTEND_URL}/verify-email/{uid}/{token}/"
 
             subject = 'Verify Your MuseWave Account'
@@ -140,12 +139,7 @@ VERIFY YOUR EMAIL
 
 This link will expire in 24 hours.
 
-After verification, you'll receive your login credentials and can start:
-• Uploading and sharing your music tracks
-• Discovering new artists and music
-• Creating playlists and albums
-• Connecting with other music lovers
-• Tracking your music analytics
+After verification, you will receive a welcome email with your login credentials.
 
 If you didn't create this account, please ignore this email.
 
@@ -165,6 +159,7 @@ This is an automated message. Please do not reply to this email.
             )
 
             print(f"✅ Verification email sent to {user.email}")
+            print(f"🔗 Verification URL: {verification_url}")
 
         except Exception as e:
             print(f"❌ Failed to send verification email to {user.email}: {str(e)}")
