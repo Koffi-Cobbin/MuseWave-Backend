@@ -27,14 +27,14 @@ from .serializers import (
 @api_view(['GET'])
 def get_user(request, user_id):
     user = get_object_or_404(User, id=user_id)
-    serializer = UserSerializer(user)
+    serializer = UserSerializer(user, context={'request': request})  # ← added context
     return Response(serializer.data)
 
 
 @api_view(['GET'])
 def get_user_by_username(request, username):
     user = get_object_or_404(User, username=username)
-    serializer = UserSerializer(user)
+    serializer = UserSerializer(user, context={'request': request})  # ← added context
     return Response(serializer.data)
 
 
@@ -68,7 +68,7 @@ def users_list_or_create(request):
             print(f"📝 Password cached for 24 hours for verification process")
             
             # Return user data with appropriate message
-            user_data = UserSerializer(user).data
+            user_data = UserSerializer(user, context={'request': request}).data
             
             response_data = {
                 **user_data,
@@ -181,22 +181,26 @@ def follow_user(request, user_id):
 
 
 @api_view(['PATCH', 'GET'])
-@parser_classes([MultiPartParser, FormParser, JSONParser])   # ← ADD THIS
+@parser_classes([MultiPartParser, FormParser, JSONParser])  # ← handles file uploads
 def get_or_update_user(request, user_id):
     """Combined endpoint for GET and PATCH on users"""
     user = get_object_or_404(User, id=user_id)
 
     if request.method == 'GET':
-        serializer = UserSerializer(user, context={'request': request})
+        serializer = UserSerializer(user, context={'request': request})  # ← add context
         return Response(serializer.data)
 
     elif request.method == 'PATCH':
-        serializer = UserSerializer(user, data=request.data, partial=True,
-                                    context={'request': request})   # ← pass context
+        serializer = UserSerializer(
+            user, data=request.data, partial=True,
+            context={'request': request}  # ← add context
+        )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
 
 
 @api_view(['GET'])

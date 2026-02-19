@@ -32,7 +32,7 @@ class LoginSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        print("Validating LoginSerializer with attrs:", attrs)  # Debugging line
+        print("Validating LoginSerializer with attrs:", attrs)
 
         username_or_email = attrs.get("username_or_email")
         password = attrs.get("password")
@@ -73,19 +73,39 @@ class LoginSerializer(serializers.Serializer):
 
 class UserDetailSerializer(serializers.ModelSerializer):
     """
-    Serializer for user details in authentication responses
+    Serializer for user details in authentication responses.
+    Mirrors the main UserSerializer so avatar_url / header_url are always
+    built from the stored ImageField files, not bare URL columns.
     """
     social_links = serializers.SerializerMethodField()
-    
+    avatar_url = serializers.SerializerMethodField()
+    header_url = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'display_name', 'bio',
             'avatar_url', 'header_url', 'location', 'website',
-            'social_links', 'verified', 'created_at', 'updated_at'
+            'social_links', 'verified', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
-    
+
+    def get_avatar_url(self, obj):
+        if obj.avatar_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.avatar_file.url)
+            return obj.avatar_file.url
+        return None
+
+    def get_header_url(self, obj):
+        if obj.header_file:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.header_file.url)
+            return obj.header_file.url
+        return None
+
     def get_social_links(self, obj):
         return {
             'twitter': obj.twitter,
@@ -114,28 +134,24 @@ class ChangePasswordSerializer(serializers.Serializer):
         write_only=True,
         style={'input_type': 'password'}
     )
-    
+
     def validate_old_password(self, value):
-        """Validate that old password is correct"""
         user = self.context['request'].user
         if not user.check_password(value):
             raise serializers.ValidationError(
                 _('Current password is incorrect')
             )
         return value
-    
+
     def validate(self, attrs):
-        """Validate that new passwords match and meet requirements"""
         new_password = attrs.get('new_password')
         new_password_confirm = attrs.get('new_password_confirm')
-        
-        # Check passwords match
+
         if new_password != new_password_confirm:
             raise serializers.ValidationError({
                 'new_password_confirm': _('Passwords do not match')
             })
-        
-        # Validate password strength
+
         user = self.context['request'].user
         try:
             validate_password(new_password, user)
@@ -143,17 +159,15 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({
                 'new_password': list(e.messages)
             })
-        
-        # Check new password is different from old
+
         if attrs.get('old_password') == new_password:
             raise serializers.ValidationError({
                 'new_password': _('New password must be different from current password')
             })
-        
+
         return attrs
-    
+
     def save(self):
-        """Update user password"""
         user = self.context['request'].user
         user.set_password(self.validated_data['new_password'])
         user.save()
@@ -165,14 +179,12 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     Serializer for password reset request
     """
     email = serializers.EmailField(required=True)
-    
+
     def validate_email(self, value):
-        """Check if user with this email exists"""
         try:
             user = User.objects.get(email=value, is_active=True)
             self.context['user'] = user
         except User.DoesNotExist:
-            # Don't reveal if email exists for security
             pass
         return value
 
@@ -193,10 +205,8 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         write_only=True,
         style={'input_type': 'password'}
     )
-    
+
     def validate(self, attrs):
-        """Validate token and passwords"""
-        # Decode uid
         try:
             uid = urlsafe_base64_decode(attrs['uid']).decode()
             user = User.objects.get(pk=uid)
@@ -204,32 +214,28 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             raise serializers.ValidationError({
                 'uid': _('Invalid reset link')
             })
-        
-        # Check token
+
         if not default_token_generator.check_token(user, attrs['token']):
             raise serializers.ValidationError({
                 'token': _('Invalid or expired reset link')
             })
-        
-        # Check passwords match
+
         if attrs['new_password'] != attrs['new_password_confirm']:
             raise serializers.ValidationError({
                 'new_password_confirm': _('Passwords do not match')
             })
-        
-        # Validate password strength
+
         try:
             validate_password(attrs['new_password'], user)
         except ValidationError as e:
             raise serializers.ValidationError({
                 'new_password': list(e.messages)
             })
-        
+
         attrs['user'] = user
         return attrs
-    
+
     def save(self):
-        """Reset user password"""
         user = self.validated_data['user']
         user.set_password(self.validated_data['new_password'])
         user.save()
