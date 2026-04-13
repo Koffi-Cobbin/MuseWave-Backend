@@ -136,6 +136,9 @@ def verify_email(request, uidb64, token):
     # Send welcome email with credentials
     email_sent = send_welcome_email_with_credentials(user, password)
 
+    # Clear cached password
+    cache.delete(cache_key)
+
     response_data = {
         'success': True,
         'message': 'Email verified successfully! Check your email for login credentials.',
@@ -144,13 +147,9 @@ def verify_email(request, uidb64, token):
             'username': user.username,
             'email': user.email,
             'verified': True,
-            'display_name': user.display_name,
-            'password': password if email_sent else "Password not sent due to email error"
+            'display_name': user.display_name
         }
     }
-
-    # Clear cached password
-    cache.delete(cache_key)
 
     if not email_sent:
         response_data['warning'] = (
