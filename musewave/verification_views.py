@@ -78,6 +78,7 @@ def verify_email(request, uidb64, token):
     """
     try:
         uid = force_str(urlsafe_base64_decode(uidb64))
+        print(f"🔍 Decoded UID: {uid} from uidb64: {uidb64}")
         user = User.objects.get(pk=uid)
 
     except (TypeError, ValueError, OverflowError, User.DoesNotExist):
