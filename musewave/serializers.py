@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
-from .models import User, Track, Like, Download, Play, Follow, Playlist, Comment, Album
+from .models import User, Track, Like, Download, Play, Follow, Playlist, PlaylistTrack, Comment, Album
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -368,17 +368,47 @@ class FollowSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class PlaylistTrackSerializer(serializers.ModelSerializer):
+    track = TrackSerializer(read_only=True)
+    track_id = serializers.UUIDField(write_only=True, required=False)
+
+    class Meta:
+        model = PlaylistTrack
+        fields = ['id', 'track_id', 'track', 'order', 'added_at']
+        read_only_fields = ['id', 'track', 'added_at']
+
+
 class PlaylistSerializer(serializers.ModelSerializer):
     user_id = serializers.UUIDField(source='user.id', read_only=True)
+    tracks_count = serializers.SerializerMethodField()
     track_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Playlist
-        fields = ['id', 'user_id', 'name', 'description', 'cover_url', 'track_ids', 'public', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = [
+            'id', 'user_id', 'name', 'description', 'cover_url',
+            'public', 'created_at', 'updated_at', 'tracks_count', 'track_ids',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'tracks_count', 'track_ids']
+
+    def get_tracks_count(self, obj):
+        return obj.playlist_tracks.count()
 
     def get_track_ids(self, obj):
-        return [str(track.id) for track in obj.tracks.all()]
+        return [str(item.track.id) for item in obj.playlist_tracks.all()]
+
+
+class PlaylistDetailSerializer(serializers.ModelSerializer):
+    user_id = serializers.UUIDField(source='user.id', read_only=True)
+    tracks = PlaylistTrackSerializer(source='playlist_tracks', many=True, read_only=True)
+
+    class Meta:
+        model = Playlist
+        fields = [
+            'id', 'user_id', 'name', 'description', 'cover_url',
+            'public', 'created_at', 'updated_at', 'tracks',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'tracks']
 
 
 class CommentSerializer(serializers.ModelSerializer):

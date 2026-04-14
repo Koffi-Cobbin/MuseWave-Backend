@@ -223,7 +223,13 @@ class Playlist(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(max_length=1000, blank=True, null=True)
     cover_url = models.URLField(blank=True, null=True)
-    tracks = models.ManyToManyField(Track, related_name='in_playlists', blank=True)
+    tracks = models.ManyToManyField(
+        Track,
+        related_name='in_playlists',
+        blank=True,
+        through='PlaylistTrack',
+        through_fields=('playlist', 'track')
+    )
     public = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -234,6 +240,21 @@ class Playlist(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class PlaylistTrack(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name='playlist_tracks')
+    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_tracks')
+    added_at = models.DateTimeField(auto_now_add=True)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = [('playlist', 'track'), ('playlist', 'order')]
+        ordering = ['order', 'added_at']
+
+    def __str__(self):
+        return f"{self.playlist.name} - {self.track.title}"
 
 
 class Comment(models.Model):

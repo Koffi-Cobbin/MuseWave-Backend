@@ -1,7 +1,11 @@
-from django.urls import path, re_path
+from django.urls import path, re_path, include
+from rest_framework.routers import DefaultRouter
 from . import views
 from . import auth_views
 from . import verification_views
+
+router = DefaultRouter()
+router.register(r'playlists', views.PlaylistViewSet, basename='playlist')
 
 
 urlpatterns = [
@@ -61,3 +65,5 @@ urlpatterns = [
     path('search/rebuild', views.rebuild_search_index, name='rebuild_search_index'),
     path('search', views.search, name='search'),
 ]
+
+urlpatterns += router.urls

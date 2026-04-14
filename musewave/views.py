@@ -1,22 +1,25 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Q, Count, Sum, Avg
+from django.db.models import Q, Count, Sum, Avg, Max
 from django.http import FileResponse, StreamingHttpResponse, HttpResponse
 from django.core.cache import cache
-from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework import status, viewsets
+from rest_framework.decorators import api_view, parser_classes, action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 from datetime import timedelta
 import os
 import mimetypes
 
-from .models import User, Track, Like, Download, Play, Follow, Album
+from .models import User, Track, Like, Download, Play, Follow, Album, Playlist, PlaylistTrack
 from .serializers import (
     UserSerializer, CreateUserSerializer, TrackSerializer,
     CreateTrackSerializer, UpdateTrackSerializer, LikeSerializer,
     DownloadSerializer, PlaySerializer, FollowSerializer,
-    UserStatsSerializer, TrackStatsSerializer, AlbumSerializer, CreateAlbumSerializer
+    UserStatsSerializer, TrackStatsSerializer, AlbumSerializer,
+    CreateAlbumSerializer, PlaylistSerializer,
+    PlaylistDetailSerializer, PlaylistTrackSerializer
 )
 
 
@@ -729,3 +732,92 @@ def get_track_stream_url(request, track_id):
         'duration': track.audio_duration,
         'format': track.audio_format
     })
+
+
+class PlaylistViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    queryset = Playlist.objects.all().prefetch_related('playlist_tracks__track')
+    serializer_class = PlaylistSerializer
+
+    def get_queryset(self):
+        return self.queryset.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PlaylistDetailSerializer
+        return PlaylistSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def add_track(self, request, pk=None):
+        playlist = self.get_object()
+        track_id = request.data.get('track_id')
+        if not track_id:
+            return Response({'error': 'track_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        track = get_object_or_404(Track, id=track_id)
+        if PlaylistTrack.objects.filter(playlist=playlist, track=track).exists():
+            return Response({'error': 'Track already exists in playlist'}, status=status.HTTP_400_BAD_REQUEST)
+
+        max_order = PlaylistTrack.objects.filter(playlist=playlist).aggregate(Max('order'))['order__max']
+        next_order = 0 if max_order is None else max_order + 1
+        playlist_track = PlaylistTrack.objects.create(
+            playlist=playlist,
+            track=track,
+            order=next_order
+        )
+
+        serializer = PlaylistTrackSerializer(playlist_track, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def remove_track(self, request, pk=None):
+        playlist = self.get_object()
+        track_id = request.data.get('track_id')
+        if not track_id:
+            return Response({'error': 'track_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            playlist_track = PlaylistTrack.objects.get(playlist=playlist, track_id=track_id)
+        except PlaylistTrack.DoesNotExist:
+            return Response({'error': 'Track not found in playlist'}, status=status.HTTP_404_NOT_FOUND)
+
+        playlist_track.delete()
+        return Response({'success': True}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def reorder(self, request, pk=None):
+        playlist = self.get_object()
+        payload = request.data
+        if not isinstance(payload, list):
+            return Response({'error': 'Payload must be a list of {"id", "order"} objects'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ids = [item.get('id') for item in payload if isinstance(item, dict)]
+        if len(ids) != len(payload) or None in ids:
+            return Response({'error': 'Each item must contain an "id" field'}, status=status.HTTP_400_BAD_REQUEST)
+
+        order_values = [item.get('order') for item in payload]
+        if any(not isinstance(order, int) for order in order_values):
+            return Response({'error': 'Each "order" must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(order_values) != len(set(order_values)):
+            return Response({'error': 'Duplicate order values are not allowed'}, status=status.HTTP_400_BAD_REQUEST)
+
+        playlist_tracks = PlaylistTrack.objects.filter(playlist=playlist, id__in=ids)
+        if playlist_tracks.count() != len(ids):
+            return Response({'error': 'One or more playlist track entries are invalid'}, status=status.HTTP_400_BAD_REQUEST)
+
+        track_map = {str(item.id): item for item in playlist_tracks}
+        updates = []
+        for item in payload:
+            item_id = str(item['id'])
+            playlist_track = track_map.get(item_id)
+            if not playlist_track:
+                return Response({'error': f'Invalid playlist track id: {item_id}'}, status=status.HTTP_400_BAD_REQUEST)
+            playlist_track.order = item['order']
+            updates.append(playlist_track)
+
+        PlaylistTrack.objects.bulk_update(updates, ['order'])
+        return Response({'success': True}, status=status.HTTP_200_OK)

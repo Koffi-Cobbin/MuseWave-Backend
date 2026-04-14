@@ -40,6 +40,17 @@ Database is SQLite.
 - `PATCH /musewave/albums/<id>/update` - Update album
 - `DELETE /musewave/albums/<id>/delete` - Delete album (tracks remain, album association removed)
 
+### Playlists
+
+- `GET /musewave/playlists/` - List user's playlists
+- `POST /musewave/playlists/` - Create a new playlist
+- `GET /musewave/playlists/<id>/` - Get playlist details (includes tracks)
+- `PATCH /musewave/playlists/<id>/` - Update playlist (rename)
+- `DELETE /musewave/playlists/<id>/` - Delete playlist
+- `POST /musewave/playlists/<id>/add_track/` - Add track to playlist
+- `POST /musewave/playlists/<id>/remove_track/` - Remove track from playlist
+- `POST /musewave/playlists/<id>/reorder/` - Reorder tracks in playlist
+
 ### Likes
 
 - `POST /musewave/tracks/<track_id>/like/` - Like a track
@@ -170,6 +181,88 @@ Content-Type: application/json
 }
 ```
 
+### Create a Playlist
+
+**Request:**
+```bash
+POST /musewave/playlists/
+Authorization: Bearer <your-jwt-token>
+Content-Type: application/json
+
+{
+  "name": "My Favorite Tracks",
+  "description": "A collection of my favorite songs",
+  "public": true
+}
+```
+
+**Response:**
+```json
+{
+  "id": "playlist-uuid",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My Favorite Tracks",
+  "description": "A collection of my favorite songs",
+  "public": true,
+  "tracks_count": 0,
+  "track_ids": [],
+  "created_at": "2024-02-04T10:30:00Z",
+  "updated_at": "2024-02-04T10:30:00Z"
+}
+```
+
+### Add Track to Playlist
+
+**Request:**
+```bash
+POST /musewave/playlists/<playlist-id>/add_track/
+Authorization: Bearer <your-jwt-token>
+Content-Type: application/json
+
+{
+  "track_id": "track-uuid-1"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "playlist-track-uuid",
+  "track_id": "track-uuid-1",
+  "track": {
+    "id": "track-uuid-1",
+    "title": "Summer Vibes",
+    "artist": "John Doe",
+    "audio_url": "https://example.com/tracks/summer-vibes.mp3",
+    "audio_duration": 240.5
+  },
+  "order": 0,
+  "added_at": "2024-02-04T10:35:00Z"
+}
+```
+
+### Reorder Playlist Tracks
+
+**Request:**
+```bash
+POST /musewave/playlists/<playlist-id>/reorder/
+Authorization: Bearer <your-jwt-token>
+Content-Type: application/json
+
+[
+  {"id": "playlist-track-uuid-1", "order": 1},
+  {"id": "playlist-track-uuid-2", "order": 0},
+  {"id": "playlist-track-uuid-3", "order": 2}
+]
+```
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
 ### List Tracks with Filters
 
 **Request:**
@@ -234,6 +327,17 @@ GET /musewave/search/?q=summer&type=all&limit=20
 - References: follower, following
 - Timestamp: created_at
 
+### Playlist
+- Info: name, description, public
+- Media: cover_url
+- Relationships: user (owner), tracks (many-to-many through PlaylistTrack)
+- Metadata: created_at, updated_at
+
+### PlaylistTrack
+- References: playlist, track
+- Ordering: order (integer for track sequence)
+- Timestamp: added_at
+
 ## Statistics & Analytics
 
 The API provides comprehensive statistics:
@@ -251,3 +355,63 @@ The API provides comprehensive statistics:
 - Unique listener count
 - Average listen duration
 - Completion rate (% who listened to >80%)
+
+## Sample API Usage
+
+Here's a complete example of using the API to create a user, upload tracks, create a playlist, and manage it:
+
+```bash
+# 1. Create a user
+curl -X POST http://localhost:8000/api/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "musicfan",
+    "email": "fan@example.com",
+    "password": "password123",
+    "display_name": "Music Fan"
+  }'
+
+# 2. Login to get JWT token
+curl -X POST http://localhost:8000/api/users/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "fan@example.com",
+    "password": "password123"
+  }'
+
+# 3. Create tracks (assuming you have track data)
+curl -X POST http://localhost:8000/api/tracks \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user-uuid",
+    "title": "Awesome Song",
+    "artist": "Music Fan",
+    "genre": "Pop",
+    "audio_url": "https://example.com/song.mp3",
+    "audio_duration": 180,
+    "published": true
+  }'
+
+# 4. Create a playlist
+curl -X POST http://localhost:8000/api/playlists \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Playlist",
+    "description": "My favorite songs",
+    "public": true
+  }'
+
+# 5. Add tracks to playlist
+curl -X POST http://localhost:8000/api/playlists/PLAYLIST_UUID/add_track \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "track_id": "track-uuid"
+  }'
+
+# 6. Get playlist with tracks
+curl -X GET http://localhost:8000/api/playlists/PLAYLIST_UUID \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import User, Track, Like, Download, Play, Follow, Playlist, Comment, Album
+from .models import User, Track, Like, Download, Play, Follow, Playlist, PlaylistTrack, Comment, Album
 
 
 @admin.register(User)
@@ -59,6 +59,14 @@ class PlaylistAdmin(admin.ModelAdmin):
     list_display = ['name', 'user', 'public', 'created_at']
     list_filter = ['public', 'created_at']
     search_fields = ['name', 'user__username']
+
+
+@admin.register(PlaylistTrack)
+class PlaylistTrackAdmin(admin.ModelAdmin):
+    list_display = ['playlist', 'track', 'order', 'added_at']
+    list_filter = ['added_at']
+    search_fields = ['playlist__name', 'track__title']
+    ordering = ['playlist', 'order']
 
 
 @admin.register(Comment)
