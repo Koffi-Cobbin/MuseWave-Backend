@@ -484,3 +484,56 @@ def verify_token_view(request):
         },
         status=status.HTTP_200_OK
     )
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def debug_jwt_token(request):
+    """
+    Debug endpoint to test JWT token validity
+    Does NOT require authentication - for debugging purposes only
+    
+    POST /api/users/debug-jwt/
+    
+    Request body:
+    {
+        "token": "eyJ0eXAi..."
+    }
+    
+    Response shows exact JWT error if token is invalid
+    """
+    token = request.data.get('token')
+    
+    if not token:
+        return Response(
+            {'error': 'token parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        from rest_framework_simplejwt.authentication import JWTAuthentication
+        from rest_framework_simplejwt.tokens import AccessToken
+        
+        # Try to validate the token
+        access_token = AccessToken(token)
+        
+        return Response({
+            'valid': True,
+            'user_id': access_token.get('user_id'),
+            'exp': access_token.get('exp'),
+            'token_type': access_token.get('token_type'),
+            'message': 'Token is valid'
+        })
+        
+    except Exception as e:
+        error_type = type(e).__name__
+        error_msg = str(e)
+        
+        print(f"🔴 JWT Debug - Token Error: {error_type}: {error_msg}")
+        
+        return Response({
+            'valid': False,
+            'error_type': error_type,
+            'error_message': error_msg,
+            'message': f'Token is invalid: {error_type}'
+        }, status=status.HTTP_401_UNAUTHORIZED)

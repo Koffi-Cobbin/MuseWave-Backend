@@ -1,12 +1,21 @@
 from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken, AuthenticationFailed
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def custom_exception_handler(exc, context):
     """
     Custom exception handler that provides consistent error responses
     """
+    # Log JWT-specific errors for debugging
+    if isinstance(exc, (TokenError, InvalidToken, AuthenticationFailed)):
+        logger.error(f"JWT Auth Error: {type(exc).__name__}: {str(exc)}")
+        print(f"🔴 JWT Auth Error: {type(exc).__name__}: {str(exc)}")
+    
     # Call REST framework's default exception handler first
     response = exception_handler(exc, context)
     

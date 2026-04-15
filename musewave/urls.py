@@ -14,6 +14,7 @@ urlpatterns = [
     path('users/logout', auth_views.logout_view, name='logout'),
     path('users/refresh', auth_views.token_refresh_view, name='token_refresh'),
     path('users/verify-token', auth_views.verify_token_view, name='verify_token'),
+    path('users/debug-jwt', auth_views.debug_jwt_token, name='debug_jwt'),
     
     # Password management
     path('users/password/change', auth_views.change_password_view, name='change_password'),

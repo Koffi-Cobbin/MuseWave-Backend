@@ -740,6 +740,13 @@ class PlaylistViewSet(viewsets.ModelViewSet):
     serializer_class = PlaylistSerializer
 
     def get_queryset(self):
+        # Debug logging
+        print(f"PlaylistViewSet.get_queryset() called")
+        print(f"  request.user: {self.request.user}")
+        print(f"  request.user.is_authenticated: {self.request.user.is_authenticated}")
+        print(f"  request.auth: {self.request.auth}")
+        print(f"  Authorization header: {self.request.META.get('HTTP_AUTHORIZATION', 'NOT SET')}")
+        
         return self.queryset.filter(user=self.request.user)
 
     def get_serializer_class(self):
