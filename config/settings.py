@@ -297,6 +297,7 @@ LOGGING = {
     },
 }
 
+APPEND_SLASH = False
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:
