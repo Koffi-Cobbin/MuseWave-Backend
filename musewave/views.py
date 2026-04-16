@@ -741,6 +741,10 @@ def get_track_stream_url(request, track_id):
 @api_view(['GET', 'POST'])
 def playlists_list_or_create(request):
     """Handle both listing playlists and creating new playlists"""
+    print("USER:", request.user)
+    print("AUTH:", request.auth)
+    print("HEADERS:", request.headers.get("Authorization"))
+
     if request.method == 'GET':
         if not request.user.is_authenticated:
             return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
