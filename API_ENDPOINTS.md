@@ -14,77 +14,87 @@ Database is SQLite.
 
 ## API Endpoints
 
+### Authentication
+
+- `POST /api/users/login` - Login with email and password
+- `POST /api/users/logout` - Logout user
+- `POST /api/users/refresh` - Refresh JWT token
+- `POST /api/users/verify-token` - Verify JWT token validity
+
+### Email Verification
+
+- `GET /api/users/verify-email/<uidb64>/<token>/` - Verify email with token
+- `POST /api/users/resend-verification` - Resend verification email
+- `GET /api/users/verification-status` - Check email verification status
+
+### Password Management
+
+- `POST /api/users/password/change` - Change password
+- `POST /api/users/password/reset` - Request password reset
+- `POST /api/users/password/reset/confirm` - Confirm password reset
+
 ### Users
 
-- `GET /musewave/users/` - List all users (with pagination)
-- `GET /musewave/users/<id>/` - Get user by ID
-- `GET /musewave/users/username/<username>/` - Get user by username
-- `POST /musewave/users/create/` - Create a new user
-- `PATCH /musewave/users/<id>/update/` - Update user
-- `GET /musewave/users/<id>/stats/` - Get user statistics
-
-### Tracks
-
-- `GET /musewave/tracks/` - List tracks (with filters: userId, genre, mood, tags, published)
-- `GET /musewave/tracks/<id>/` - Get track by ID
-- `POST /musewave/tracks/create/` - Create a new track
-- `PATCH /musewave/tracks/<id>/update/` - Update track
-- `DELETE /musewave/tracks/<id>/delete/` - Delete track
-- `GET /musewave/tracks/<id>/stats/` - Get track statistics
-
-### Albums
-
-- `GET /musewave/users/<user_id>/albums` - Get all albums for a user
-- `GET /musewave/albums/<id>` - Get album by ID (includes tracks)
-- `POST /musewave/albums` - Create a new album (with track associations)
-- `PATCH /musewave/albums/<id>/update` - Update album
-- `DELETE /musewave/albums/<id>/delete` - Delete album (tracks remain, album association removed)
-
-### Playlists
-
-- `GET /musewave/playlists/` - List user's playlists
-- `POST /musewave/playlists/` - Create a new playlist
-- `GET /musewave/playlists/<id>/` - Get playlist details (includes tracks)
-- `PATCH /musewave/playlists/<id>/` - Update playlist (rename)
-- `DELETE /musewave/playlists/<id>/` - Delete playlist
-- `POST /musewave/playlists/<id>/add_track/` - Add track to playlist
-- `POST /musewave/playlists/<id>/remove_track/` - Remove track from playlist
-- `POST /musewave/playlists/<id>/reorder/` - Reorder tracks in playlist
-
-### Likes
-
-- `POST /musewave/tracks/<track_id>/like/` - Like a track
-- `DELETE /musewave/tracks/<track_id>/like/delete/` - Unlike a track
-- `GET /musewave/tracks/<track_id>/like/<user_id>/` - Check if user liked track
-- `GET /musewave/users/<user_id>/likes/` - Get user's liked tracks
-
-### Downloads
-
-- `POST /musewave/tracks/<track_id>/download/` - Record a download
-- `GET /musewave/tracks/<track_id>/downloads/` - Get track downloads
-
-### Plays
-
-- `POST /musewave/tracks/<track_id>/play/` - Record a play
-- `GET /musewave/tracks/<track_id>/plays/` - Get track plays
-- `GET /musewave/users/<user_id>/plays/` - Get user's play history
-
-### Follows
-
-- `POST /musewave/users/<user_id>/follow/` - Follow a user
-- `DELETE /musewave/users/<user_id>/follow/delete/` - Unfollow a user
-- `GET /musewave/users/<user_id>/follow/<follower_id>/` - Check if following
-- `GET /musewave/users/<user_id>/followers/` - Get user's followers
-- `GET /musewave/users/<user_id>/following/` - Get users being followed
-
-### Search
-
-- `GET /musewave/search/?q=<query>&type=<tracks|users|all>&limit=<number>` - Search
-- `POST /musewave/search/rebuild/` - Rebuild search index (no-op in Django)
+- `GET /api/users` - List all users (with pagination: limit, offset)
+- `POST /api/users` - Create a new user
+- `GET /api/users/<user_id>` - Get user by ID
+- `PATCH /api/users/<user_id>` - Update user profile
+- `GET /api/users/username/<username>` - Get user by username
+- `GET /api/users/<user_id>/stats` - Get user statistics (plays, likes, downloads, followers, etc.)
+- `GET /api/users/<user_id>/likes` - Get user's liked tracks
+- `GET /api/users/<user_id>/plays` - Get user's play history
+- `GET /api/users/<user_id>/albums` - Get all albums for a user
+- `GET /api/users/<user_id>/followers` - Get user's followers
+- `GET /api/users/<user_id>/following` - Get users being followed
+- `POST /api/users/<user_id>/follow` - Follow a user
+- `DELETE /api/users/<user_id>/follow` - Unfollow a user
+- `GET /api/users/<user_id>/follow/<follower_id>` - Check if user is following
 
 ### Artists
 
-- `GET /musewave/artists/` - Get all users who have published tracks
+- `GET /api/artists` - Get all users who have published tracks
+
+### Albums
+
+- `POST /api/albums` - Create a new album
+- `GET /api/albums/<album_id>` - Get album by ID (includes tracks)
+- `PATCH /api/albums/<album_id>/update` - Update album details
+- `DELETE /api/albums/<album_id>/delete` - Delete album (tracks remain, album association removed)
+
+### Tracks
+
+- `GET /api/tracks` - List all tracks (filters: userId, genre, mood, tags, published; sorting: sortBy, sortOrder; pagination: limit, offset)
+- `POST /api/tracks` - Create a new track
+- `GET /api/tracks/<track_id>` - Get track by ID
+- `PATCH /api/tracks/<track_id>` - Update track metadata
+- `DELETE /api/tracks/<track_id>` - Delete track
+- `GET /api/tracks/<track_id>/stream/` - Stream audio with range request support
+- `GET /api/tracks/<track_id>/stream-url/` - Get streaming URL for track
+- `GET /api/tracks/<track_id>/download/` - Download track as file attachment
+- `POST /api/tracks/<track_id>/download` - Record a download and increment counter
+- `GET /api/tracks/<track_id>/downloads` - Get all downloads for a track
+- `GET /api/tracks/<track_id>/stats` - Get track statistics (plays, listeners, completion rate, etc.)
+- `POST /api/tracks/<track_id>/play` - Record a play event
+- `GET /api/tracks/<track_id>/plays` - Get all plays for a track
+- `POST /api/tracks/<track_id>/like` - Like a track
+- `DELETE /api/tracks/<track_id>/like` - Unlike a track
+- `GET /api/tracks/<track_id>/like/<user_id>` - Check if user liked track
+
+### Playlists
+
+- `GET /api/playlists` - List user's playlists (requires authentication)
+- `POST /api/playlists` - Create a new playlist (requires authentication)
+- `GET /api/playlists/<playlist_id>` - Get playlist details with tracks (requires authentication)
+- `PATCH /api/playlists/<playlist_id>` - Update playlist metadata (requires authentication)
+- `DELETE /api/playlists/<playlist_id>` - Delete playlist (requires authentication)
+- `POST /api/playlists/<playlist_id>/add-track` - Add track to playlist (requires authentication)
+- `POST /api/playlists/<playlist_id>/remove-track` - Remove track from playlist (requires authentication)
+- `POST /api/playlists/<playlist_id>/reorder` - Reorder tracks in playlist (requires authentication)
+
+### Search
+
+- `GET /api/search?q=<query>&type=<tracks|users|all>&limit=<number>` - Search tracks and/or users
+- `POST /api/search/rebuild` - Rebuild search index (no-op in Django, returns success)
 
 ## Request/Response Examples
 
@@ -92,7 +102,7 @@ Database is SQLite.
 
 **Request:**
 ```bash
-POST /musewave/users/create/
+POST /api/users
 Content-Type: application/json
 
 {
@@ -118,26 +128,70 @@ Content-Type: application/json
 }
 ```
 
+### Login
+
+**Request:**
+```bash
+POST /api/users/login
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "password": "securepassword123"
+}
+```
+
+**Response:**
+```json
+{
+  "access": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "user": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "username": "john_doe",
+    "email": "john@example.com"
+  }
+}
+```
+
 ### Create a Track
 
 **Request:**
 ```bash
-POST /musewave/tracks/create/
+POST /api/tracks
 Content-Type: application/json
 
 {
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "title": "Summer Vibes",
   "artist": "John Doe",
-  "artist_slug": "john-doe",
   "genre": "Electronic",
   "mood": "Happy",
   "tags": ["summer", "dance", "upbeat"],
-  "audio_url": "https://example.com/tracks/summer-vibes.mp3",
-  "audio_file_size": 5242880,
   "audio_duration": 240.5,
   "audio_format": "mp3",
   "published": true
+}
+```
+
+**Response:**
+```json
+{
+  "id": "track-uuid-1",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "title": "Summer Vibes",
+  "artist": "John Doe",
+  "genre": "Electronic",
+  "mood": "Happy",
+  "tags": ["summer", "dance", "upbeat"],
+  "audio_duration": 240.5,
+  "audio_format": "mp3",
+  "plays": 0,
+  "likes": 0,
+  "downloads": 0,
+  "published": true,
+  "created_at": "2024-02-04T10:30:00Z",
+  "updated_at": "2024-02-04T10:30:00Z"
 }
 ```
 
@@ -145,7 +199,7 @@ Content-Type: application/json
 
 **Request:**
 ```bash
-POST /musewave/albums
+POST /api/albums
 Content-Type: application/json
 
 {
@@ -155,12 +209,7 @@ Content-Type: application/json
   "genre": "Electronic",
   "description": "A collection of summer hits",
   "release_date": "2024-06-01T00:00:00Z",
-  "published": true,
-  "track_ids": [
-    "track-uuid-1",
-    "track-uuid-2",
-    "track-uuid-3"
-  ]
+  "published": true
 }
 ```
 
@@ -175,7 +224,6 @@ Content-Type: application/json
   "description": "A collection of summer hits",
   "release_date": "2024-06-01T00:00:00Z",
   "published": true,
-  "track_count": 3,
   "created_at": "2024-02-04T10:30:00Z",
   "updated_at": "2024-02-04T10:30:00Z"
 }
@@ -185,14 +233,13 @@ Content-Type: application/json
 
 **Request:**
 ```bash
-POST /musewave/playlists/
+POST /api/playlists
 Authorization: Bearer <your-jwt-token>
 Content-Type: application/json
 
 {
   "name": "My Favorite Tracks",
-  "description": "A collection of my favorite songs",
-  "public": true
+  "description": "A collection of my favorite songs"
 }
 ```
 
@@ -203,9 +250,6 @@ Content-Type: application/json
   "user_id": "550e8400-e29b-41d4-a716-446655440000",
   "name": "My Favorite Tracks",
   "description": "A collection of my favorite songs",
-  "public": true,
-  "tracks_count": 0,
-  "track_ids": [],
   "created_at": "2024-02-04T10:30:00Z",
   "updated_at": "2024-02-04T10:30:00Z"
 }
@@ -215,7 +259,7 @@ Content-Type: application/json
 
 **Request:**
 ```bash
-POST /musewave/playlists/<playlist-id>/add_track/
+POST /api/playlists/<playlist-id>/add-track
 Authorization: Bearer <your-jwt-token>
 Content-Type: application/json
 
@@ -228,16 +272,9 @@ Content-Type: application/json
 ```json
 {
   "id": "playlist-track-uuid",
+  "playlist_id": "playlist-uuid",
   "track_id": "track-uuid-1",
-  "track": {
-    "id": "track-uuid-1",
-    "title": "Summer Vibes",
-    "artist": "John Doe",
-    "audio_url": "https://example.com/tracks/summer-vibes.mp3",
-    "audio_duration": 240.5
-  },
-  "order": 0,
-  "added_at": "2024-02-04T10:35:00Z"
+  "order": 0
 }
 ```
 
@@ -245,7 +282,7 @@ Content-Type: application/json
 
 **Request:**
 ```bash
-POST /musewave/playlists/<playlist-id>/reorder/
+POST /api/playlists/<playlist-id>/reorder
 Authorization: Bearer <your-jwt-token>
 Content-Type: application/json
 
@@ -263,25 +300,147 @@ Content-Type: application/json
 }
 ```
 
+### Get User Profile
+
+**Request:**
+```bash
+GET /api/users/550e8400-e29b-41d4-a716-446655440000
+```
+
+**Response:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "john_doe",
+  "email": "john@example.com",
+  "display_name": "John Doe",
+  "bio": "Music producer and DJ",
+  "verified": true,
+  "avatar_url": "https://example.com/avatars/john.jpg",
+  "created_at": "2024-02-04T10:30:00Z",
+  "updated_at": "2024-02-04T10:31:00Z"
+}
+```
+
+### Get User Statistics
+
+**Request:**
+```bash
+GET /api/users/550e8400-e29b-41d4-a716-446655440000/stats
+```
+
+**Response:**
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "total_tracks": 15,
+  "total_plays": 1250,
+  "total_likes": 320,
+  "total_downloads": 85,
+  "total_followers": 156,
+  "total_following": 42,
+  "monthly_listeners": 87,
+  "updated_at": "2024-02-04T10:35:00Z"
+}
+```
+
+### Get Track Statistics
+
+**Request:**
+```bash
+GET /api/tracks/track-uuid-1/stats
+```
+
+**Response:**
+```json
+{
+  "track_id": "track-uuid-1",
+  "daily_plays": {
+    "2024-02-03": 45,
+    "2024-02-04": 67
+  },
+  "total_unique_listeners": 98,
+  "avg_listen_duration": 220.5,
+  "completion_rate": 85.5,
+  "updated_at": "2024-02-04T10:35:00Z"
+}
+```
+
 ### List Tracks with Filters
 
 **Request:**
 ```bash
-GET /musewave/tracks/?genre=Electronic&published=true&sortBy=plays&sortOrder=desc&limit=10
+GET /api/tracks?genre=Electronic&published=true&sortBy=plays&sortOrder=desc&limit=10
 ```
 
 ### Search
 
 **Request:**
 ```bash
-GET /musewave/search/?q=summer&type=all&limit=20
+GET /api/search?q=summer&type=all&limit=20
 ```
 
 **Response:**
 ```json
 {
-  "tracks": [...],
-  "users": [...]
+  "tracks": [
+    {
+      "id": "track-uuid-1",
+      "title": "Summer Vibes",
+      "artist": "John Doe",
+      "genre": "Electronic",
+      "plays": 150,
+      "likes": 45
+    }
+  ],
+  "users": [
+    {
+      "id": "user-uuid-1",
+      "username": "john_doe",
+      "display_name": "John Doe"
+    }
+  ]
+}
+```
+
+### Stream Audio
+
+**Request:**
+```bash
+GET /api/tracks/track-uuid-1/stream/
+Range: bytes=0-1023
+```
+
+**Response:**
+```
+HTTP/1.1 206 Partial Content
+Content-Range: bytes 0-1023/5242880
+Content-Length: 1024
+Accept-Ranges: bytes
+Content-Type: audio/mpeg
+
+[audio data bytes 0-1023]
+```
+
+### Like a Track
+
+**Request:**
+```bash
+POST /api/tracks/track-uuid-1/like
+Content-Type: application/json
+
+{
+  "userId": "user-uuid-1"
+}
+```
+
+**Response:**
+```json
+{
+  "id": "like-uuid",
+  "user_id": "user-uuid-1",
+  "track_id": "track-uuid-1",
+  "created_at": "2024-02-04T10:30:00Z"
 }
 ```
 
@@ -388,7 +547,6 @@ curl -X POST http://localhost:8000/api/tracks \
     "title": "Awesome Song",
     "artist": "Music Fan",
     "genre": "Pop",
-    "audio_url": "https://example.com/song.mp3",
     "audio_duration": 180,
     "published": true
   }'
@@ -399,12 +557,11 @@ curl -X POST http://localhost:8000/api/playlists \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My Playlist",
-    "description": "My favorite songs",
-    "public": true
+    "description": "My favorite songs"
   }'
 
 # 5. Add tracks to playlist
-curl -X POST http://localhost:8000/api/playlists/PLAYLIST_UUID/add_track \
+curl -X POST http://localhost:8000/api/playlists/PLAYLIST_UUID/add-track \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -414,4 +571,21 @@ curl -X POST http://localhost:8000/api/playlists/PLAYLIST_UUID/add_track \
 # 6. Get playlist with tracks
 curl -X GET http://localhost:8000/api/playlists/PLAYLIST_UUID \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# 7. Stream track audio
+curl -X GET http://localhost:8000/api/tracks/TRACK_UUID/stream/ \
+  -H "Range: bytes=0-10240"
+
+# 8. Like a track
+curl -X POST http://localhost:8000/api/tracks/TRACK_UUID/like \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-uuid"
+  }'
+
+# 9. Get user statistics
+curl -X GET http://localhost:8000/api/users/user-uuid/stats
+
+# 10. Search tracks and users
+curl -X GET "http://localhost:8000/api/search?q=summer&type=all&limit=20"
 ```

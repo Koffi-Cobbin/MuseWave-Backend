@@ -1,12 +1,7 @@
 from django.urls import path, re_path, include
-from rest_framework.routers import DefaultRouter
 from . import views
 from . import auth_views
 from . import verification_views
-
-router = DefaultRouter()
-router.register(r'playlists', views.PlaylistViewSet, basename='playlist')
-
 
 urlpatterns = [
     # Authentication
@@ -14,7 +9,6 @@ urlpatterns = [
     path('users/logout', auth_views.logout_view, name='logout'),
     path('users/refresh', auth_views.token_refresh_view, name='token_refresh'),
     path('users/verify-token', auth_views.verify_token_view, name='verify_token'),
-    path('users/debug-jwt', auth_views.debug_jwt_token, name='debug_jwt'),
     
     # Password management
     path('users/password/change', auth_views.change_password_view, name='change_password'),
@@ -62,9 +56,14 @@ urlpatterns = [
     path('tracks/<uuid:track_id>/plays', views.get_track_plays, name='get_track_plays'),
     path('tracks/<uuid:track_id>', views.track_detail, name='track_detail'),  # GET/PATCH/DELETE
     
+    # Playlists
+    path('playlists', views.playlists_list_or_create, name='playlists_list_or_create'),  # GET/POST
+    path('playlists/<uuid:playlist_id>', views.playlist_detail, name='playlist_detail'),  # GET/PATCH/DELETE
+    path('playlists/<uuid:playlist_id>/add-track', views.add_track_to_playlist, name='add_track_to_playlist'),  # POST
+    path('playlists/<uuid:playlist_id>/remove-track', views.remove_track_from_playlist, name='remove_track_from_playlist'),  # POST
+    path('playlists/<uuid:playlist_id>/reorder', views.reorder_playlist_tracks, name='reorder_playlist_tracks'),  # POST
+    
     # Search
     path('search/rebuild', views.rebuild_search_index, name='rebuild_search_index'),
     path('search', views.search, name='search'),
 ]
-
-urlpatterns += router.urls
