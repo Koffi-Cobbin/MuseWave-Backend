@@ -304,14 +304,14 @@ def tracks_list(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def tracks_create(request):
     """Protected endpoint for creating tracks"""
 
     serializer = CreateTrackSerializer(data=request.data)
     if serializer.is_valid():
-        track = serializer.save(user=request.user)
+        track = serializer.save()
         track_data = TrackSerializer(track, context={'request': request}).data
         return Response(track_data, status=status.HTTP_201_CREATED)
 
