@@ -22,8 +22,8 @@ urlpatterns = [
 
     # Users - Order matters! More specific routes first
     path('users/username/<str:username>', views.get_user_by_username, name='get_user_by_username'),
-    path('users/create/', views.users_create, name='users-create'),  # POST only
-    path('users/', views.users_list, name='users-list'),       # GET only
+    path('users/create', views.users_create, name='users-create'),  # POST only
+    path('users', views.users_list, name='users-list'),       # GET only
     path('users/<uuid:user_id>/stats', views.get_user_stats, name='get_user_stats'),
     path('users/<uuid:user_id>/likes', views.get_user_likes, name='get_user_likes'),
     path('users/<uuid:user_id>/plays', views.get_user_plays, name='get_user_plays'),
