@@ -187,23 +187,47 @@ def follow_user(request, user_id):
 @parser_classes([MultiPartParser, FormParser, JSONParser])  # ← handles file uploads
 def get_or_update_user(request, user_id):
     """Combined endpoint for GET and PATCH on users"""
+
     user = get_object_or_404(User, id=user_id)
 
+    # 🔒 SECURITY: only allow owner to modify profile
+    if request.method == 'PATCH' or request.method == 'GET':
+        if request.user != user:
+            return Response(
+                {"error": "You are not allowed to access this profile."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
     if request.method == 'GET':
-        serializer = UserSerializer(user, context={'request': request})  # ← add context
+        serializer = UserSerializer(user, context={'request': request})
         return Response(serializer.data)
 
     elif request.method == 'PATCH':
         serializer = UserSerializer(
-            user, data=request.data, partial=True,
-            context={'request': request}  # ← add context
+            user,
+            data=request.data,
+            partial=True,
+            context={'request': request}
         )
+
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data)
-        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+            password = request.data.get('password')
 
+            user = serializer.save()
 
+            # 🔐 Proper password hashing
+            if password:
+                user.set_password(password)
+                user.save()
+
+            return Response(
+                UserSerializer(user, context={'request': request}).data
+            )
+
+        return Response(
+            {'error': serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
 
 @api_view(['GET'])
