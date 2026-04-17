@@ -4,7 +4,8 @@ from django.db.models import Q, Count, Sum, Avg, Max
 from django.http import FileResponse, StreamingHttpResponse, HttpResponse
 from django.core.cache import cache
 from rest_framework import status, viewsets
-from rest_framework.decorators import api_view, parser_classes, action
+from rest_framework.decorators import api_view, parser_classes, permission_classes, action
+from rest_framework.permissions import AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -41,47 +42,46 @@ def get_user_by_username(request, username):
     return Response(serializer.data)
 
 
-@api_view(['GET', 'POST'])
-def users_list_or_create(request):
-    """Handle both listing users and creating new users"""
-    if request.method == 'GET':
-        limit = int(request.GET.get('limit', 50))
-        offset = int(request.GET.get('offset', 0))
-        
-        users = User.objects.all()[offset:offset + limit]
-        serializer = UserSerializer(users, many=True)
-        return Response(serializer.data)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def users_create(request):
+    """Public endpoint for user signup"""
     
-    elif request.method == 'POST':
-        # Store the plain password before serializer processes it
-        plain_password = request.data.get('password')
-        
-        serializer = CreateUserSerializer(data=request.data)
-        if serializer.is_valid():
-            # Save user and send verification email
-            user = serializer.save()
-            
-            # Cache the password for 24 hours (86400 seconds)
-            # This will be used when the user verifies their email
-            cache_key = f'user_password_{user.id}'
-            cache.set(cache_key, plain_password, 86400)  # 24 hours
-            
-            # Log user creation
-            print(f"✅ New user created: {user.username} ({user.email}) - Verification email sent")
-            print(f"📝 Password cached for 24 hours for verification process")
-            
-            # Return user data with appropriate message
-            user_data = UserSerializer(user, context={'request': request}).data
-            
-            response_data = {
-                **user_data,
-                'message': 'Account created successfully! Please check your email to verify your account.',
-                'verification_required': True
-            }
-            
-            return Response(response_data, status=status.HTTP_201_CREATED)
-        
-        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+    plain_password = request.data.get('password')
+
+    serializer = CreateUserSerializer(data=request.data)
+    if serializer.is_valid():
+        user = serializer.save()
+
+        # Cache password for verification flow
+        cache_key = f'user_password_{user.id}'
+        cache.set(cache_key, plain_password, 86400)
+
+        print(f"✅ New user created: {user.username} ({user.email})")
+
+        user_data = UserSerializer(user, context={'request': request}).data
+
+        return Response({
+            **user_data,
+            'message': 'Account created successfully! Please check your email to verify your account.',
+            'verification_required': True
+        }, status=status.HTTP_201_CREATED)
+
+    return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def users_list(request):
+    """Protected endpoint for listing users"""
+
+    limit = int(request.GET.get('limit', 50))
+    offset = int(request.GET.get('offset', 0))
+
+    users = User.objects.all()[offset:offset + limit]
+    serializer = UserSerializer(users, many=True, context={'request': request})
+
+    return Response(serializer.data)
 
 
 @api_view(['PATCH', 'GET'])
