@@ -311,8 +311,7 @@ def tracks_create(request):
 
     serializer = CreateTrackSerializer(data=request.data)
     if serializer.is_valid():
-        track = serializer.save()
-
+        track = serializer.save(user=request.user)
         track_data = TrackSerializer(track, context={'request': request}).data
         return Response(track_data, status=status.HTTP_201_CREATED)
 
