@@ -44,8 +44,8 @@ urlpatterns = [
     path('albums/<uuid:album_id>/delete', views.delete_album, name='delete_album'),  # DELETE
     
     # Tracks
-    path('tracks/', views.tracks_list, name='tracks-list'),        # GET
-    path('tracks/create/', views.tracks_create, name='tracks-create'),  # POST
+    path('tracks', views.tracks_list, name='tracks-list'),        # GET
+    path('tracks/create', views.tracks_create, name='tracks-create'),  # POST
     path('tracks/<uuid:track_id>/stream/', views.stream_track, name='stream_track'),  # GET
     path('tracks/<uuid:track_id>/stream-url/', views.get_track_stream_url, name='get_track_stream_url'),  # GET
     path('tracks/<uuid:track_id>/download/', views.download_track, name='download_track'),  # GET
