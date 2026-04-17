@@ -21,9 +21,9 @@ urlpatterns = [
     path('users/verification-status', verification_views.check_verification_status, name='check_verification_status'),
 
     # Users - Order matters! More specific routes first
-    path('users/username/<str:username>', views.get_user_by_username, name='get_user_by_username'),
-    path('users/create', views.users_create, name='users-create'),  # POST only
     path('users', views.users_list, name='users-list'),       # GET only
+    path('users/create', views.users_create, name='users-create'),  # POST only
+    path('users/username/<str:username>', views.get_user_by_username, name='get_user_by_username'),
     path('users/<uuid:user_id>/stats', views.get_user_stats, name='get_user_stats'),
     path('users/<uuid:user_id>/likes', views.get_user_likes, name='get_user_likes'),
     path('users/<uuid:user_id>/plays', views.get_user_plays, name='get_user_plays'),
@@ -44,7 +44,8 @@ urlpatterns = [
     path('albums/<uuid:album_id>/delete', views.delete_album, name='delete_album'),  # DELETE
     
     # Tracks
-    path('tracks', views.tracks_list_or_create, name='tracks_list_or_create'),  # GET/POST
+    path('tracks/', views.tracks_list, name='tracks-list'),        # GET
+    path('tracks/create/', views.tracks_create, name='tracks-create'),  # POST
     path('tracks/<uuid:track_id>/stream/', views.stream_track, name='stream_track'),  # GET
     path('tracks/<uuid:track_id>/stream-url/', views.get_track_stream_url, name='get_track_stream_url'),  # GET
     path('tracks/<uuid:track_id>/download/', views.download_track, name='download_track'),  # GET

@@ -256,61 +256,67 @@ def get_artists(request):
 # ============================================================================
 # TRACKS
 # ============================================================================
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def tracks_list(request):
+    """Public endpoint for listing tracks"""
 
-@api_view(['GET', 'POST'])
+    tracks = Track.objects.all()
+
+    # Filters
+    user_id = request.GET.get('userId')
+    if user_id:
+        tracks = tracks.filter(user_id=user_id)
+
+    genre = request.GET.get('genre')
+    if genre:
+        tracks = tracks.filter(genre__iexact=genre)
+
+    mood = request.GET.get('mood')
+    if mood:
+        tracks = tracks.filter(mood__iexact=mood)
+
+    tags = request.GET.get('tags')
+    if tags:
+        tag_list = tags.split(',')
+        for tag in tag_list:
+            tracks = tracks.filter(tags__contains=tag)
+
+    published = request.GET.get('published')
+    if published == 'true':
+        tracks = tracks.filter(published=True)
+    elif published == 'false':
+        tracks = tracks.filter(published=False)
+
+    # Sorting
+    sort_by = request.GET.get('sortBy', 'created_at')
+    sort_order = request.GET.get('sortOrder', 'desc')
+    order_field = f'-{sort_by}' if sort_order == 'desc' else sort_by
+    tracks = tracks.order_by(order_field)
+
+    # Pagination
+    limit = int(request.GET.get('limit', 50))
+    offset = int(request.GET.get('offset', 0))
+    tracks = tracks[offset:offset + limit]
+
+    serializer = TrackSerializer(tracks, many=True, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
-def tracks_list_or_create(request):
-    """Handle both listing tracks and creating new tracks"""
-    if request.method == 'GET':
-        tracks = Track.objects.all()
-        
-        # Apply filters
-        user_id = request.GET.get('userId')
-        if user_id:
-            tracks = tracks.filter(user_id=user_id)
-        
-        genre = request.GET.get('genre')
-        if genre:
-            tracks = tracks.filter(genre__iexact=genre)
-        
-        mood = request.GET.get('mood')
-        if mood:
-            tracks = tracks.filter(mood__iexact=mood)
-        
-        tags = request.GET.get('tags')
-        if tags:
-            tag_list = tags.split(',')
-            for tag in tag_list:
-                tracks = tracks.filter(tags__contains=tag)
-        
-        published = request.GET.get('published')
-        if published == 'true':
-            tracks = tracks.filter(published=True)
-        elif published == 'false':
-            tracks = tracks.filter(published=False)
-        
-        # Sorting
-        sort_by = request.GET.get('sortBy', 'created_at')
-        sort_order = request.GET.get('sortOrder', 'desc')
-        
-        order_field = f'-{sort_by}' if sort_order == 'desc' else sort_by
-        tracks = tracks.order_by(order_field)
-        
-        # Pagination
-        limit = int(request.GET.get('limit', 50))
-        offset = int(request.GET.get('offset', 0))
-        tracks = tracks[offset:offset + limit]
-        
-        serializer = TrackSerializer(tracks, many=True, context={'request': request})
-        return Response(serializer.data)
-    
-    elif request.method == 'POST':
-        serializer = CreateTrackSerializer(data=request.data)
-        if serializer.is_valid():
-            track = serializer.save()
-            track_data = TrackSerializer(track, context={'request': request}).data
-            return Response(track_data, status=status.HTTP_201_CREATED)
-        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+def tracks_create(request):
+    """Protected endpoint for creating tracks"""
+
+    serializer = CreateTrackSerializer(data=request.data)
+    if serializer.is_valid():
+        track = serializer.save()
+
+        track_data = TrackSerializer(track, context={'request': request}).data
+        return Response(track_data, status=status.HTTP_201_CREATED)
+
+    return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST', 'GET', 'PATCH', 'DELETE'])
