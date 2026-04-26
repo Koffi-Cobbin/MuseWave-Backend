@@ -2,11 +2,11 @@
 musewave/celery.py
 
 Celery application entrypoint.
-Add this file to your Django project root (musewave/ package).
+Add this file to your Django project root.
 """
 
 import os
-from config.celery import Celery
+from celery import Celery
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "musewave.settings")
 

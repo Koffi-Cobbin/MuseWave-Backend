@@ -311,10 +311,6 @@ CACHES = {
     }
 }
 
-# 6. File upload size limit (200 MB for audio)
-DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024
-
 # Security settings for production (PythonAnywhere)
 if not DEBUG:
     SECURE_SSL_REDIRECT = False  # PythonAnywhere handles SSL
