@@ -1,10 +1,3 @@
-"""
-Management command: python manage.py init_drive_folders
-
-Ensures MuseWave folder structure exists in the admin Google Drive.
-Safe to run multiple times (idempotent).
-"""
-
 from django.core.management.base import BaseCommand
 
 

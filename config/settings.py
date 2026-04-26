@@ -245,21 +245,20 @@ Q_CLUSTER = {
     'name': 'musewave',
     # ORM broker: tasks are stored in the database, no external broker needed.
     'orm': 'default',
-    # Number of worker processes.  Keep at 1 on PythonAnywhere free tier to
+    # Number of worker processes. Keep at 1 on PythonAnywhere free tier to
     # stay within process limits.
     'workers': 1,
-    # Seconds a task may run before being killed.
+    # Seconds a task may run before being killed (must be less than retry).
     'timeout': 300,
+    # Seconds before a task is re-queued if not finished. Must be > timeout.
+    'retry': 360,
     # Seconds between broker polls.
     'poll': 5,
-    # How many times to retry a failed task (0 = no retry).
-    'retry': 60,
-    # Keep result records for 24 hours (seconds).
-    'save_limit': 250,
+    # How many times to attempt a failed task before giving up.
     'max_attempts': 3,
+    # Keep this many result records in the DB.
+    'save_limit': 250,
     'label': 'MuseWave Tasks',
-    # Use Django cache for result storage when available.
-    'cache': 'default',
 }
 
 
