@@ -1,6 +1,3 @@
-
-python
-
 """
 Authentication Serializers for MuseWave API
 Handles login, password change, and password reset functionality
