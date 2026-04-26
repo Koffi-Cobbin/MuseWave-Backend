@@ -85,7 +85,7 @@ def update_user(request, user_id):
     """
     Update own profile — only the authenticated owner may update their record.
     PATCH /api/users/<id>
-    Accepts multipart/form-data with optional avatar_upload / header_upload files.
+    Accepts multipart/form-data with optional avatar_file / header_file files.
     """
     user = get_object_or_404(User, id=user_id)
     if request.user != user:

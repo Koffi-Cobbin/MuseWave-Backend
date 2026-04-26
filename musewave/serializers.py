@@ -150,34 +150,34 @@ class PublicUserSerializer(serializers.ModelSerializer):
 class UpdateUserSerializer(serializers.ModelSerializer):
     """
     Write serializer for PATCH /api/users/<id>.
-    Accepts optional avatar_upload / header_upload files and routes them to Drive.
+    Accepts optional avatar_file / header_file files and routes them to Drive.
     """
-    avatar_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
-    header_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    avatar_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    header_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model  = User
         fields = [
             'display_name', 'bio', 'location', 'website',
             'twitter', 'instagram', 'spotify', 'soundcloud',
-            'avatar_upload', 'header_upload',
+            'avatar_file', 'header_file',
         ]
 
     def update(self, instance, validated_data):
         from fileforge.models import DriveFile
 
-        avatar_upload = validated_data.pop('avatar_upload', None)
-        header_upload = validated_data.pop('header_upload', None)
+        avatar_file = validated_data.pop('avatar_file', None)
+        header_file = validated_data.pop('header_file', None)
 
         # Update plain fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if avatar_upload:
+        if avatar_file:
             instance.avatar_file = _replace_drive_file(
                 old_drive_file=instance.avatar_file,
-                new_file_obj=avatar_upload,
+                new_file_obj=avatar_file,
                 category=DriveFile.Category.USER_AVATAR,
                 resource_type=DriveFile.ResourceType.USER,
                 resource_id=str(instance.id),
@@ -185,10 +185,10 @@ class UpdateUserSerializer(serializers.ModelSerializer):
             )
             instance.save(update_fields=['avatar_file'])
 
-        if header_upload:
+        if header_file:
             instance.header_file = _replace_drive_file(
                 old_drive_file=instance.header_file,
-                new_file_obj=header_upload,
+                new_file_obj=header_file,
                 category=DriveFile.Category.USER_HEADER,
                 resource_type=DriveFile.ResourceType.USER,
                 resource_id=str(instance.id),
@@ -206,14 +206,14 @@ class CreateUserSerializer(serializers.ModelSerializer):
     soundcloud = serializers.CharField(required=False, allow_blank=True)
 
     # Optional avatar on signup — uploaded to Drive
-    avatar_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    avatar_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model  = User
         fields = [
             'username', 'email', 'password', 'display_name', 'bio',
             'location', 'website', 'twitter', 'instagram', 'spotify', 'soundcloud',
-            'avatar_upload',
+            'avatar_file',
         ]
         extra_kwargs = {
             'password': {'write_only': True},
@@ -235,7 +235,7 @@ class CreateUserSerializer(serializers.ModelSerializer):
         from fileforge.models import DriveFile
 
         password      = validated_data.pop('password')
-        avatar_upload = validated_data.pop('avatar_upload', None)
+        avatar_file = validated_data.pop('avatar_file', None)
 
         user = User(**validated_data)
         user.set_password(password)
@@ -243,10 +243,10 @@ class CreateUserSerializer(serializers.ModelSerializer):
         user.verified  = False
         user.save()
 
-        if avatar_upload:
+        if avatar_file:
             try:
                 drive_file = _upload_to_drive(
-                    file_obj=avatar_upload,
+                    file_obj=avatar_file,
                     category=DriveFile.Category.USER_AVATAR,
                     resource_type=DriveFile.ResourceType.USER,
                     resource_id=str(user.id),
@@ -318,21 +318,21 @@ class AlbumSerializer(serializers.ModelSerializer):
 
 class CreateAlbumSerializer(serializers.ModelSerializer):
     user_id      = serializers.UUIDField(write_only=True)
-    cover_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
     track_ids    = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model  = Album
         fields = [
             'user_id', 'title', 'artist', 'description',
-            'cover_upload', 'cover_gradient', 'release_date', 'genre',
+            'cover_file', 'cover_gradient', 'release_date', 'genre',
             'published', 'track_ids',
         ]
 
     def create(self, validated_data):
         from fileforge.models import DriveFile
 
-        cover_upload   = validated_data.pop('cover_upload', None)
+        cover_file   = validated_data.pop('cover_file', None)
         track_ids_raw  = validated_data.pop('track_ids', [])
         user_id        = validated_data.pop('user_id')
 
@@ -347,10 +347,10 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
         user  = User.objects.get(id=user_id)
         album = Album.objects.create(user=user, **validated_data)
 
-        if cover_upload:
+        if cover_file:
             try:
                 drive_file = _upload_to_drive(
-                    file_obj=cover_upload,
+                    file_obj=cover_file,
                     category=DriveFile.Category.ALBUM_COVER,
                     resource_type=DriveFile.ResourceType.ALBUM,
                     resource_id=str(album.id),
@@ -369,31 +369,31 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
 
 
 class UpdateAlbumSerializer(serializers.ModelSerializer):
-    cover_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
     track_ids    = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model  = Album
         fields = [
             'title', 'artist', 'description',
-            'cover_upload', 'cover_gradient', 'release_date', 'genre',
+            'cover_file', 'cover_gradient', 'release_date', 'genre',
             'published', 'track_ids',
         ]
 
     def update(self, instance, validated_data):
         from fileforge.models import DriveFile
 
-        cover_upload  = validated_data.pop('cover_upload', None)
+        cover_file  = validated_data.pop('cover_file', None)
         track_ids_raw = validated_data.pop('track_ids', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
 
-        if cover_upload:
+        if cover_file:
             instance.cover_file = _replace_drive_file(
                 old_drive_file=instance.cover_file,
-                new_file_obj=cover_upload,
+                new_file_obj=cover_file,
                 category=DriveFile.Category.ALBUM_COVER,
                 resource_type=DriveFile.ResourceType.ALBUM,
                 resource_id=str(instance.id),
@@ -446,16 +446,16 @@ class TrackSerializer(serializers.ModelSerializer):
 
 class CreateTrackSerializer(serializers.ModelSerializer):
     user_id      = serializers.UUIDField(write_only=True)
-    audio_upload = serializers.FileField(write_only=True)
-    cover_upload = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    audio_file   = serializers.FileField(write_only=True)
+    cover_file   = serializers.ImageField(write_only=True, required=False, allow_null=True)
     tags         = serializers.JSONField(required=False)
 
     class Meta:
         model  = Track
         fields = [
             'user_id', 'title', 'artist', 'artist_slug', 'description',
-            'genre', 'mood', 'tags', 'audio_upload', 'audio_file_size',
-            'audio_duration', 'audio_format', 'cover_upload', 'cover_gradient',
+            'genre', 'mood', 'tags', 'audio_file', 'audio_file_size',
+            'audio_duration', 'audio_format', 'cover_file', 'cover_gradient',
             'waveform_data', 'bpm', 'key', 'published',
         ]
 
@@ -469,8 +469,8 @@ class CreateTrackSerializer(serializers.ModelSerializer):
         from django.utils import timezone
 
         user_id      = validated_data.pop('user_id')
-        audio_upload = validated_data.pop('audio_upload')
-        cover_upload = validated_data.pop('cover_upload', None)
+        audio_file = validated_data.pop('audio_file')
+        cover_file = validated_data.pop('cover_file', None)
 
         user = User.objects.get(id=user_id)
 
@@ -489,7 +489,7 @@ class CreateTrackSerializer(serializers.ModelSerializer):
         # ── Upload audio ──────────────────────────────────────────────────────
         try:
             audio_drive = _upload_to_drive(
-                file_obj=audio_upload,
+                file_obj=audio_file,
                 category=DriveFile.Category.TRACK_AUDIO,
                 resource_type=DriveFile.ResourceType.TRACK,
                 resource_id=str(track.id),
@@ -507,10 +507,10 @@ class CreateTrackSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f"Audio upload failed: {exc}")
 
         # ── Upload cover (non-fatal) ───────────────────────────────────────────
-        if cover_upload:
+        if cover_file:
             try:
                 cover_drive = _upload_to_drive(
-                    file_obj=cover_upload,
+                    file_obj=cover_file,
                     category=DriveFile.Category.TRACK_COVER,
                     resource_type=DriveFile.ResourceType.TRACK,
                     resource_id=str(track.id),
@@ -525,15 +525,15 @@ class CreateTrackSerializer(serializers.ModelSerializer):
 
 
 class UpdateTrackSerializer(serializers.ModelSerializer):
-    audio_upload = serializers.FileField(required=False, allow_null=True)
-    cover_upload = serializers.ImageField(required=False, allow_null=True)
+    audio_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model  = Track
         fields = [
             'title', 'artist', 'artist_slug', 'description', 'genre', 'mood',
-            'tags', 'audio_upload', 'audio_file_size', 'audio_duration',
-            'audio_format', 'cover_upload', 'cover_gradient', 'waveform_data',
+            'tags', 'audio_file', 'audio_file_size', 'audio_duration',
+            'audio_format', 'cover_file', 'cover_gradient', 'waveform_data',
             'bpm', 'key', 'published',
         ]
 
@@ -541,8 +541,8 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
         from fileforge.models import DriveFile
         from django.utils import timezone
 
-        audio_upload = validated_data.pop('audio_upload', None)
-        cover_upload = validated_data.pop('cover_upload', None)
+        audio_file = validated_data.pop('audio_file', None)
+        cover_file = validated_data.pop('cover_file', None)
 
         if 'published' in validated_data and validated_data['published'] and not instance.published:
             instance.published_at = timezone.now()
@@ -558,10 +558,10 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
         instance.save()
 
         # ── Replace audio ─────────────────────────────────────────────────────
-        if audio_upload:
+        if audio_file:
             new_audio = _replace_drive_file(
                 old_drive_file=instance.audio_file,
-                new_file_obj=audio_upload,
+                new_file_obj=audio_file,
                 category=DriveFile.Category.TRACK_AUDIO,
                 resource_type=DriveFile.ResourceType.TRACK,
                 resource_id=str(instance.id),
@@ -575,10 +575,10 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
             instance.save(update_fields=['audio_file', 'audio_file_size', 'audio_format'])
 
         # ── Replace cover ─────────────────────────────────────────────────────
-        if cover_upload:
+        if cover_file:
             new_cover = _replace_drive_file(
                 old_drive_file=instance.cover_file,
-                new_file_obj=cover_upload,
+                new_file_obj=cover_file,
                 category=DriveFile.Category.TRACK_COVER,
                 resource_type=DriveFile.ResourceType.TRACK,
                 resource_id=str(instance.id),
