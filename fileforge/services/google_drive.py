@@ -1,7 +1,8 @@
 """
 fileforge/services/google_drive.py
 
-All Google Drive operations via a service account.
+All Google Drive operations via OAuth2 (refresh token).
+Uploads files to the authenticated user's personal Google Drive.
 Handles upload, retrieval, update, deletion, and streaming.
 """
 
@@ -9,13 +10,13 @@ import io
 import logging
 import mimetypes
 import os
-from functools import lru_cache
 from typing import Generator
 
 from django.conf import settings
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -25,18 +26,41 @@ CHUNK_SIZE = 5 * 1024 * 1024  # 5 MB chunks for streaming
 
 # ─── Auth ──────────────────────────────────────────────────────────────────────
 
-@lru_cache(maxsize=1)
 def get_drive_service():
-    """Build and cache a Drive API client using service account credentials."""
-    cred_file = getattr(settings, "GOOGLE_SERVICE_ACCOUNT_FILE", None)
-    if not cred_file or not os.path.exists(cred_file):
+    """
+    Build a Drive API client using OAuth2 refresh token credentials.
+    The access token is refreshed automatically when expired.
+
+    Requires in settings (loaded from .env):
+        GOOGLE_CLIENT_ID
+        GOOGLE_CLIENT_SECRET
+        GOOGLE_REFRESH_TOKEN
+
+    To generate these values, run:
+        python generate_google_token.py
+    """
+    client_id     = getattr(settings, "GOOGLE_CLIENT_ID", None)
+    client_secret = getattr(settings, "GOOGLE_CLIENT_SECRET", None)
+    refresh_token = getattr(settings, "GOOGLE_REFRESH_TOKEN", None)
+
+    if not all([client_id, client_secret, refresh_token]):
         raise EnvironmentError(
-            "GOOGLE_SERVICE_ACCOUNT_FILE is not set or file does not exist. "
-            "Set it in your .env / Django settings."
+            "Missing Google OAuth2 credentials. "
+            "Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in your .env."
         )
-    credentials = service_account.Credentials.from_service_account_file(
-        cred_file, scopes=SCOPES
+
+    credentials = Credentials(
+        token=None,  # will be fetched automatically on first API call
+        refresh_token=refresh_token,
+        client_id=client_id,
+        client_secret=client_secret,
+        token_uri="https://oauth2.googleapis.com/token",
     )
+
+    # Proactively refresh so we catch credential errors early
+    if not credentials.valid:
+        credentials.refresh(Request())
+
     return build("drive", "v3", credentials=credentials, cache_discovery=False)
 
 
@@ -52,7 +76,7 @@ def upload_file(
 ) -> "DriveFile":
     """
     Upload *file_obj* to the correct Drive folder for *category*.
-    Creates and returns a DriveFile instance (not yet saved — caller saves it).
+    Creates and returns a saved DriveFile instance.
 
     filename should already be prefixed, e.g. track_{id}_audio.mp3
     """
@@ -93,9 +117,8 @@ def upload_file(
 
     file_id = drive_file["id"]
 
-    # Make the file readable by anyone with the link (for proxy streaming via service account)
-    # We keep files private; the backend proxies them, so no public permission needed.
-    # If you want direct links: uncomment below.
+    # Files are kept private; the backend proxies streams via the OAuth token.
+    # To allow direct public links instead, uncomment:
     # service.permissions().create(
     #     fileId=file_id, body={"type": "anyone", "role": "reader"}
     # ).execute()
@@ -182,7 +205,7 @@ def stream_file_chunks(file_id: str, start: int = 0, end: int = None) -> Generat
     """
     Generator that yields byte chunks for the given Drive file.
     Supports Range requests (start/end byte positions).
-    Uses service account credentials for authenticated download.
+    Uses OAuth2 credentials for authenticated download.
     """
     service = get_drive_service()
 

@@ -53,3 +53,5 @@ db-data/
 *.db
 
 service_account.json
+google_auth_client.json
+generate_google_token.py
