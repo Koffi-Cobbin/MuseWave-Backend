@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg, Max
-from django.http import FileResponse, StreamingHttpResponse, HttpResponse
+from django.http import StreamingHttpResponse
 from django.core.cache import cache
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, parser_classes, permission_classes, action
@@ -10,8 +10,6 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from datetime import timedelta
-import os
-import mimetypes
 
 from .models import User, Track, Like, Download, Play, Follow, Album, Playlist, PlaylistTrack
 from .serializers import (
@@ -631,135 +629,83 @@ def rebuild_search_index(request):
 # AUDIO STREAMING AND DOWNLOAD
 # ============================================================================
 
+# stream_track is handled by TrackStreamView in stream_views.py.
+# Routed via: path('tracks/<uuid:track_id>/stream/', TrackStreamView.as_view(), ...)
+# Kept as a thin stub so any accidental direct call returns a clear error
+# rather than an AttributeError from the old FileField code.
 @api_view(['GET'])
 def stream_track(request, track_id):
-    """
-    Stream audio with support for range requests (seeking).
-    This allows the audio player to seek to different positions in the track.
-    """
-    track = get_object_or_404(Track, id=track_id)
-    
-    if not track.audio_file:
-        return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    try:
-        file_path = track.audio_file.path
-        file_size = os.path.getsize(file_path)
-        
-        # Get range header for seeking support
-        range_header = request.META.get('HTTP_RANGE', '').strip()
-        
-        if range_header:
-            # Parse range header (e.g., "bytes=0-1023")
-            import re
-            range_match = re.match(r'bytes=(\d+)-(\d*)', range_header)
-            
-            if range_match:
-                start = int(range_match.group(1))
-                end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
-                length = end - start + 1
-                
-                # Open file and seek to start position
-                with open(file_path, 'rb') as audio_file:
-                    audio_file.seek(start)
-                    data = audio_file.read(length)
-                
-                # Return partial content (206)
-                response = HttpResponse(
-                    data,
-                    status=206,
-                    content_type=track.audio_format or 'audio/mpeg'
-                )
-                response['Content-Range'] = f'bytes {start}-{end}/{file_size}'
-                response['Accept-Ranges'] = 'bytes'
-                response['Content-Length'] = length
-                response['Cache-Control'] = 'public, max-age=31536000'
-                
-                return response
-        
-        # No range request - return full file
-        response = FileResponse(
-            open(file_path, 'rb'),
-            content_type=track.audio_format or 'audio/mpeg'
-        )
-        response['Content-Length'] = file_size
-        response['Accept-Ranges'] = 'bytes'
-        response['Cache-Control'] = 'public, max-age=31536000'
-        
-        return response
-        
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(
+        {'detail': 'Use /api/tracks/{id}/stream/ via TrackStreamView.'},
+        status=status.HTTP_501_NOT_IMPLEMENTED,
+    )
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def download_track(request, track_id):
     """
-    Download track as an attachment.
+    Download track as an attachment, streamed from Google Drive.
     Increments the download count and logs the download.
     """
+    from fileforge.services.google_drive import stream_file_chunks
+
     track = get_object_or_404(Track, id=track_id)
-    
+
     if not track.audio_file:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    try:
-        file_path = track.audio_file.path
-        
-        # Increment download count
-        track.downloads += 1
-        track.save(update_fields=['downloads'])
-        
-        # Log the download
-        user = request.user if request.user.is_authenticated else None
-        ip_address = request.META.get('REMOTE_ADDR')
-        user_agent = request.META.get('HTTP_USER_AGENT', '')
-        
-        Download.objects.create(
-            user=user,
-            track=track,
-            ip_address=ip_address,
-            user_agent=user_agent
-        )
-        
-        # Determine filename
-        filename = f"{track.artist} - {track.title}.{track.audio_format or 'mp3'}"
-        
-        # Return file as attachment
-        response = FileResponse(
-            open(file_path, 'rb'),
-            content_type='application/octet-stream',
-            as_attachment=True,
-            filename=filename
-        )
-        
-        return response
-        
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    drive_file = track.audio_file
+    file_id = drive_file.file_id
+    total_size = drive_file.size or 0
+    mime_type = drive_file.file_type or 'application/octet-stream'
+
+    # Derive a clean download filename from track metadata
+    ext = (mime_type.split('/')[-1] if '/' in mime_type else 'mp3')
+    filename = f"{track.artist} - {track.title}.{ext}"
+
+    # Log the download and increment counter
+    Download.objects.create(
+        user=request.user,
+        track=track,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+    )
+    track.downloads += 1
+    track.save(update_fields=['downloads'])
+
+    def _chunks():
+        yield from stream_file_chunks(file_id, start=0, end=total_size - 1)
+
+    response = StreamingHttpResponse(_chunks(), content_type=mime_type)
+    response['Content-Length'] = total_size
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 @api_view(['GET'])
 def get_track_stream_url(request, track_id):
     """
-    Get the streaming URL for a track.
-    This is useful for the frontend to get the URL without actually streaming.
+    Return the streaming URL for a track without actually streaming.
+    Useful for frontend players that need the URL upfront.
     """
     track = get_object_or_404(Track, id=track_id)
-    
+
     if not track.audio_file:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Build absolute URL for streaming
+
+    drive_file = track.audio_file
     stream_url = request.build_absolute_uri(f'/api/tracks/{track_id}/stream/')
-    
+    mime_type = drive_file.file_type or ''
+    fmt = mime_type.split('/')[-1] if '/' in mime_type else (track.audio_format or 'mp3')
+
     return Response({
         'id': str(track.id),
         'title': track.title,
         'artist': track.artist,
         'stream_url': stream_url,
         'duration': track.audio_duration,
-        'format': track.audio_format
+        'format': fmt,
     })
 
 

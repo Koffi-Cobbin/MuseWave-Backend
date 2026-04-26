@@ -2,6 +2,7 @@ from django.urls import path, re_path, include
 from . import views
 from . import auth_views
 from . import verification_views
+from .stream_views import TrackStreamView
 
 urlpatterns = [
     # Authentication
@@ -46,7 +47,7 @@ urlpatterns = [
     # Tracks
     path('tracks', views.tracks_list, name='tracks-list'),        # GET
     path('tracks/create', views.tracks_create, name='tracks-create'),  # POST
-    path('tracks/<uuid:track_id>/stream/', views.stream_track, name='stream_track'),  # GET
+    path('tracks/<uuid:track_id>/stream/', TrackStreamView.as_view(), name='stream_track'),  # GET
     path('tracks/<uuid:track_id>/stream-url/', views.get_track_stream_url, name='get_track_stream_url'),  # GET
     path('tracks/<uuid:track_id>/download/', views.download_track, name='download_track'),  # GET
     path('tracks/<uuid:track_id>/stats', views.get_track_stats, name='get_track_stats'),

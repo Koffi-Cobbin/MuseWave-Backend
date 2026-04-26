@@ -113,11 +113,17 @@ class Track(models.Model):
     mood = models.CharField(max_length=50, blank=True, null=True)
     tags = models.JSONField(default=list, blank=True)
     
-    # File information
-    audio_file = models.FileField(upload_to='tracks/audio/%Y/%m/')
-    audio_file_size = models.BigIntegerField()  # bytes
+    # File information — stored in Google Drive via fileforge
+    audio_file = models.OneToOneField(
+        'fileforge.DriveFile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='track',
+    )
+    audio_file_size = models.BigIntegerField(null=True, blank=True)  # mirrored from DriveFile.size on upload
     audio_duration = models.FloatField()  # seconds
-    audio_format = models.CharField(max_length=20)  # mp3, wav, etc.
+    audio_format = models.CharField(max_length=20, blank=True, null=True)  # mirrored from DriveFile.file_type on upload
     
     cover_file = models.ImageField(upload_to='tracks/covers/%Y/%m/', blank=True, null=True)
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
