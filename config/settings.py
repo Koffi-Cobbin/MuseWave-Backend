@@ -231,7 +231,7 @@ FRONTEND_URL = 'https://muse-wave.web.app'
 
 # ============================================================================
 # CACHING
-# Uses Django's built-in LocMemCache — no Redis required on PythonAnywhere.
+# Uses database as cache backend to avoid needing Redis on PythonAnywhere free tier.
 # ============================================================================
 
 CACHES = {

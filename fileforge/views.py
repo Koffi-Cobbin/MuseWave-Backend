@@ -180,8 +180,8 @@ class DriveFileViewSet(ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ── Stream ────────────────────────────────────────────────────────────────
-
-    @action(detail=True, methods=["get"], url_path="stream", permission_classes=[IsAuthenticated])
+    # permission_classes=[IsAuthenticated]
+    @action(detail=True, methods=["get"], url_path="stream")
     def stream(self, request, pk=None):
         """
         Proxy stream a Drive file with HTTP Range support for seeking.
