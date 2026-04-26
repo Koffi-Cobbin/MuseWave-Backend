@@ -51,3 +51,5 @@ Thumbs.db
 # Database
 db-data/
 *.db
+
+service_account.json

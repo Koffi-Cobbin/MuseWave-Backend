@@ -1,22 +1,21 @@
 """
 fileforge/tasks.py
 
-Celery background tasks for async file processing.
+Django-Q2 background tasks for async file processing.
+Replaces the previous Celery implementation — no broker/Redis required.
+
+Enqueue tasks with:
+    from django_q.tasks import async_task
+    async_task('fileforge.tasks.upload_file_async', ...)
 """
 
 import logging
 import os
-import tempfile
-
-from celery import shared_task
-from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=30)
 def upload_file_async(
-    self,
     file_path: str,
     filename: str,
     category: str,
@@ -25,8 +24,11 @@ def upload_file_async(
     user_id=None,
 ):
     """
-    Upload a file to Google Drive asynchronously.
+    Upload a file to Google Drive.
     *file_path* is a path to a temp file written by the view.
+
+    Called asynchronously via Django-Q2:
+        async_task('fileforge.tasks.upload_file_async', ...)
     """
     from fileforge.services.google_drive import upload_file
     from fileforge.services.media_utils import compress_image
@@ -51,12 +53,13 @@ def upload_file_async(
                 resource_id=resource_id,
                 uploaded_by=user,
             )
+
         logger.info("Async upload complete: DriveFile id=%s", drive_file.id)
         return str(drive_file.id)
 
     except Exception as exc:
         logger.error("Async upload failed: %s", exc, exc_info=True)
-        raise self.retry(exc=exc)
+        raise  # Django-Q2 will record the failure and retry per Q_CLUSTER settings
 
     finally:
         try:
@@ -65,11 +68,13 @@ def upload_file_async(
             pass
 
 
-@shared_task(bind=True, max_retries=2)
-def extract_and_store_audio_metadata(self, drive_file_id: str, file_path: str):
+def extract_and_store_audio_metadata(drive_file_id: str, file_path: str):
     """
     Extract audio metadata (duration, bitrate) from a temp file
     and store it on the related Track model.
+
+    Called asynchronously via Django-Q2:
+        async_task('fileforge.tasks.extract_and_store_audio_metadata', ...)
     """
     from fileforge.models import DriveFile
     from fileforge.services.media_utils import extract_audio_metadata
@@ -81,15 +86,15 @@ def extract_and_store_audio_metadata(self, drive_file_id: str, file_path: str):
 
         drive_file = DriveFile.objects.get(id=drive_file_id)
         if drive_file.resource_type == "track":
-            from music.models import Track
+            from musewave.models import Track
             Track.objects.filter(pk=drive_file.resource_id).update(
-                duration=meta.get("duration_seconds"),
+                audio_duration=meta.get("duration_seconds"),
             )
             logger.info("Stored audio metadata for Track %s", drive_file.resource_id)
 
     except Exception as exc:
         logger.error("Metadata extraction failed: %s", exc, exc_info=True)
-        raise self.retry(exc=exc)
+        raise
 
     finally:
         try:
@@ -98,10 +103,12 @@ def extract_and_store_audio_metadata(self, drive_file_id: str, file_path: str):
             pass
 
 
-@shared_task(bind=True, max_retries=2)
-def generate_and_upload_thumbnail(self, drive_file_id: str, resource_type: str, resource_id: str):
+def generate_and_upload_thumbnail(drive_file_id: str, resource_type: str, resource_id: str):
     """
     Download a cover image from Drive, generate a thumbnail, re-upload it.
+
+    Called asynchronously via Django-Q2:
+        async_task('fileforge.tasks.generate_and_upload_thumbnail', ...)
     """
     from fileforge.models import DriveFile
     from fileforge.services.google_drive import get_drive_service, upload_file
@@ -126,13 +133,10 @@ def generate_and_upload_thumbnail(self, drive_file_id: str, resource_type: str, 
         if thumb_io is None:
             return
 
-        # Determine thumbnail category
-        thumb_category = drive_file.category  # same category folder
-
         upload_file(
             file_obj=thumb_io,
             filename=thumb_name,
-            category=thumb_category,
+            category=drive_file.category,
             resource_type=resource_type,
             resource_id=resource_id,
         )
@@ -140,4 +144,4 @@ def generate_and_upload_thumbnail(self, drive_file_id: str, resource_type: str, 
 
     except Exception as exc:
         logger.error("Thumbnail generation failed: %s", exc, exc_info=True)
-        raise self.retry(exc=exc)
+        raise

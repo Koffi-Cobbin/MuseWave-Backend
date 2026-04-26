@@ -5,12 +5,11 @@ DRF views for DriveFile CRUD + proxy streaming with HTTP Range support.
 """
 
 import logging
-import mimetypes
 import os
 import re
 import tempfile
 
-from django.http import StreamingHttpResponse, HttpResponse
+from django.http import StreamingHttpResponse
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -27,7 +26,6 @@ from .services.google_drive import (
     stream_file_chunks,
     update_file as drive_update,
     upload_file,
-    get_drive_service,
 )
 from .services.media_utils import compress_image
 
@@ -53,11 +51,11 @@ class DriveFileViewSet(ModelViewSet):
     """
     CRUD for DriveFile records.
 
-    POST   /api/fileforge/files/           → upload
-    GET    /api/fileforge/files/           → list
-    GET    /api/fileforge/files/{id}/      → retrieve
-    PATCH  /api/fileforge/files/{id}/      → update
-    DELETE /api/fileforge/files/{id}/      → delete
+    POST   /api/fileforge/files/             → upload
+    GET    /api/fileforge/files/             → list
+    GET    /api/fileforge/files/{id}/        → retrieve
+    PATCH  /api/fileforge/files/{id}/        → update
+    DELETE /api/fileforge/files/{id}/        → delete
     GET    /api/fileforge/files/{id}/stream/ → proxy stream
     """
 
@@ -100,7 +98,7 @@ class DriveFileViewSet(ModelViewSet):
         ):
             file, filename = compress_image(file, filename)
 
-        # Large files → async; small files → synchronous
+        # Large files → async via Django-Q2; small files → synchronous
         if file.size > LARGE_FILE_THRESHOLD:
             return self._create_async(file, filename, category, resource_type, resource_id, request.user)
 
@@ -115,8 +113,8 @@ class DriveFileViewSet(ModelViewSet):
         return Response(DriveFileSerializer(drive_record).data, status=status.HTTP_201_CREATED)
 
     def _create_async(self, file, filename, category, resource_type, resource_id, user):
-        """Save file to temp disk and enqueue Celery task."""
-        from .tasks import upload_file_async
+        """Save file to a temp path and enqueue a Django-Q2 task."""
+        from django_q.tasks import async_task
 
         suffix = os.path.splitext(filename)[-1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -124,16 +122,22 @@ class DriveFileViewSet(ModelViewSet):
                 tmp.write(chunk)
             tmp_path = tmp.name
 
-        task = upload_file_async.delay(
-            file_path=tmp_path,
-            filename=filename,
-            category=category,
-            resource_type=resource_type,
-            resource_id=str(resource_id),
-            user_id=user.pk if user else None,
+        task_id = async_task(
+            'fileforge.tasks.upload_file_async',
+            tmp_path,
+            filename,
+            category,
+            resource_type,
+            str(resource_id),
+            user.pk if user else None,
         )
+
         return Response(
-            {"status": "queued", "task_id": task.id, "message": "Large file upload queued."},
+            {
+                "status": "queued",
+                "task_id": task_id,
+                "message": "Large file upload queued.",
+            },
             status=status.HTTP_202_ACCEPTED,
         )
 
@@ -185,12 +189,10 @@ class DriveFileViewSet(ModelViewSet):
         instance = self.get_object()
         file_id = instance.file_id
 
-        # Get file size from Drive metadata
         meta = drive_get(file_id)
         total_size = int(meta.get("size", 0))
         mime_type = instance.file_type or "application/octet-stream"
 
-        # Parse Range header
         range_header = request.META.get("HTTP_RANGE", "")
         start, end = 0, total_size - 1
         status_code = 200
@@ -223,25 +225,48 @@ class DriveFileViewSet(ModelViewSet):
 
 
 class TaskStatusView(APIView):
-    """Poll Celery task status for async uploads."""
+    """
+    Poll Django-Q2 task status for async uploads.
+
+    GET /api/fileforge/tasks/<task_id>/
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request, task_id):
-        from celery.result import AsyncResult
-        result = AsyncResult(task_id)
-        data = {
-            "task_id": task_id,
-            "status": result.status,
-        }
-        if result.ready():
-            if result.successful():
-                drive_file_id = result.result
+        from django_q.models import Task, Failure
+
+        # Check successful tasks first
+        try:
+            task = Task.objects.get(id=task_id)
+            drive_file_id = task.result
+            data = {
+                "task_id": task_id,
+                "status": "SUCCESS",
+            }
+            if drive_file_id:
                 try:
                     df = DriveFile.objects.get(id=drive_file_id)
                     data["drive_file"] = DriveFileSerializer(df).data
                 except DriveFile.DoesNotExist:
                     data["drive_file_id"] = drive_file_id
-            else:
-                data["error"] = str(result.result)
-        return Response(data)
+            return Response(data)
+        except Task.DoesNotExist:
+            pass
+
+        # Check failed tasks
+        try:
+            failure = Failure.objects.get(id=task_id)
+            return Response({
+                "task_id": task_id,
+                "status": "FAILURE",
+                "error": failure.result,
+            })
+        except Failure.DoesNotExist:
+            pass
+
+        # Task is still queued / in progress
+        return Response({
+            "task_id": task_id,
+            "status": "PENDING",
+        })

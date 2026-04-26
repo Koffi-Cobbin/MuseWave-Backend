@@ -29,44 +29,39 @@ else:
 # JWT AUTHENTICATION SETTINGS
 # ============================================================================
 
-# Install required package: pip install djangorestframework-simplejwt
-
-# JWT Settings
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
-    
+
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
     'AUDIENCE': None,
     'ISSUER': None,
-    
+
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
-    
+
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
-    
+
     'JTI_CLAIM': 'jti',
-    
+
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=60),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=7),
 }
 
 
-
 # ============================================================================
-# INSTALLED APPS 
+# INSTALLED APPS
 # ============================================================================
 
-# Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -78,6 +73,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'django_q',
     'musewave',
     'fileforge',
 ]
@@ -114,7 +110,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database - Using SQLite for file-based storage similar to JSON
+# Database - Using SQLite
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -154,17 +150,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 
-# Static files configuration for both local and PythonAnywhere
 if ON_PYTHONANYWHERE:
     STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 else:
     STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Additional locations of static files (for development)
-STATICFILES_DIRS = [
-    # Add any additional static directories here if needed
-    # BASE_DIR / 'static',
-]
+STATICFILES_DIRS = []
 
 # Media files configuration
 MEDIA_URL = '/media/'
@@ -174,11 +165,9 @@ if ON_PYTHONANYWHERE:
 else:
     MEDIA_ROOT = BASE_DIR / 'media'
 
-
 # File upload limits
 FILE_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
 DATA_UPLOAD_MAX_MEMORY_SIZE = 52428800  # 50MB
-
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -201,11 +190,9 @@ REST_FRAMEWORK = {
 }
 
 # CORS settings
-# Adjust for production - don't allow all origins in production!
 if DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 else:
-    # In production, specify exact origins
     CORS_ALLOWED_ORIGINS = [
         'https://kofficobbin.pythonanywhere.com',
         "http://localhost:3000",
@@ -225,10 +212,6 @@ AUTH_USER_MODEL = 'musewave.User'
 # EMAIL SETTINGS
 # ============================================================================
 
-# Development - Console backend (prints to console)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
-# Production - SMTP settings (uncomment and configure for production)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.environ.get("EMAIL_HOST")
 EMAIL_PORT = os.environ.get("EMAIL_PORT")
@@ -238,18 +221,47 @@ EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
 
 # Frontend URL for password reset links
-FRONTEND_URL = 'https://muse-wave.web.app'  # Update for production
+FRONTEND_URL = 'https://muse-wave.web.app'
+
 
 # ============================================================================
-# CACHING (for rate limiting)
+# CACHING
+# Uses Django's built-in LocMemCache — no Redis required on PythonAnywhere.
 # ============================================================================
 
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'unique-snowflake',
+        'LOCATION': 'musewave-cache',
     }
 }
+
+
+# ============================================================================
+# DJANGO-Q2  (replaces Celery — uses the ORM as its broker, no Redis needed)
+# ============================================================================
+
+Q_CLUSTER = {
+    'name': 'musewave',
+    # ORM broker: tasks are stored in the database, no external broker needed.
+    'orm': 'default',
+    # Number of worker processes.  Keep at 1 on PythonAnywhere free tier to
+    # stay within process limits.
+    'workers': 1,
+    # Seconds a task may run before being killed.
+    'timeout': 300,
+    # Seconds between broker polls.
+    'poll': 5,
+    # How many times to retry a failed task (0 = no retry).
+    'retry': 60,
+    # Keep result records for 24 hours (seconds).
+    'save_limit': 250,
+    'max_attempts': 3,
+    'label': 'MuseWave Tasks',
+    # Use Django cache for result storage when available.
+    'cache': 'default',
+}
+
 
 # ============================================================================
 # LOGGING
@@ -292,24 +304,6 @@ APPEND_SLASH = False
 
 GOOGLE_SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "")
 GOOGLE_DRIVE_ROOT_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_ROOT_FOLDER_ID", "root")
-
-# 4. Celery
-CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
-CELERY_RESULT_BACKEND = os.environ.get("REDIS_URL", "redis://localhost:6379/1")
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-
-# 5. Cache (for folder ID caching)
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": os.environ.get("REDIS_URL", "redis://localhost:6379/2"),
-        "OPTIONS": {
-            "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        },
-    }
-}
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:
