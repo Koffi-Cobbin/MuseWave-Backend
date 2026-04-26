@@ -1,25 +1,42 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.db.models import Q, Count, Sum, Avg, Max
+from django.db.models import Q, Sum, Avg, Max
 from django.http import StreamingHttpResponse
 from django.core.cache import cache
-from rest_framework import status, viewsets
-from rest_framework.decorators import api_view, parser_classes, permission_classes, action
-from rest_framework.permissions import AllowAny
+from rest_framework import status
+from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from datetime import timedelta
 
 from .models import User, Track, Like, Download, Play, Follow, Album, Playlist, PlaylistTrack
 from .serializers import (
-    UserSerializer, CreateUserSerializer, TrackSerializer,
-    CreateTrackSerializer, UpdateTrackSerializer, LikeSerializer,
-    DownloadSerializer, PlaySerializer, FollowSerializer,
-    UserStatsSerializer, TrackStatsSerializer, AlbumSerializer,
-    CreateAlbumSerializer, PlaylistSerializer,
-    PlaylistDetailSerializer, PlaylistTrackSerializer
+    UserSerializer, PublicUserSerializer, UpdateUserSerializer, CreateUserSerializer,
+    TrackSerializer, CreateTrackSerializer, UpdateTrackSerializer,
+    LikeSerializer, DownloadSerializer, PlaySerializer, FollowSerializer,
+    UserStatsSerializer, TrackStatsSerializer,
+    AlbumSerializer, CreateAlbumSerializer, UpdateAlbumSerializer,
+    PlaylistSerializer, PlaylistDetailSerializer, PlaylistTrackSerializer,
 )
+
+logger = logging.getLogger(__name__)
+
+
+# ─── Shared Drive cleanup helper ──────────────────────────────────────────────
+
+def _delete_drive_file(drive_file):
+    """Silently delete a DriveFile from Google Drive and the DB."""
+    if not drive_file:
+        return
+    from fileforge.services.google_drive import delete_file as drive_delete
+    try:
+        drive_delete(drive_file.file_id)
+        drive_file.delete()
+    except Exception as exc:
+        logger.warning("Could not delete DriveFile %s: %s", drive_file.id, exc)
 
 
 # ============================================================================
@@ -27,42 +44,89 @@ from .serializers import (
 # ============================================================================
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_user(request, user_id):
+    """Public profile — email and other sensitive fields are excluded."""
     user = get_object_or_404(User, id=user_id)
-    serializer = UserSerializer(user, context={'request': request})  # ← added context
+    serializer = PublicUserSerializer(user, context={'request': request})
     return Response(serializer.data)
 
 
 @api_view(['GET'])
+@permission_classes([AllowAny])
 def get_user_by_username(request, username):
+    """Public profile lookup by username."""
     user = get_object_or_404(User, username=username)
-    serializer = UserSerializer(user, context={'request': request})  # ← added context
+    serializer = PublicUserSerializer(user, context={'request': request})
     return Response(serializer.data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_own_profile(request, user_id):
+    """
+    Full profile — only the authenticated owner may access their own record.
+    GET /api/users/<id>/me
+    """
+    user = get_object_or_404(User, id=user_id)
+    if request.user != user:
+        return Response(
+            {'error': 'You are not allowed to access this profile.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    serializer = UserSerializer(user, context={'request': request})
+    return Response(serializer.data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def update_user(request, user_id):
+    """
+    Update own profile — only the authenticated owner may update their record.
+    PATCH /api/users/<id>
+    Accepts multipart/form-data with optional avatar_upload / header_upload files.
+    """
+    user = get_object_or_404(User, id=user_id)
+    if request.user != user:
+        return Response(
+            {'error': 'You are not allowed to modify this profile.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    serializer = UpdateUserSerializer(
+        user, data=request.data, partial=True, context={'request': request}
+    )
+    if serializer.is_valid():
+        password = request.data.get('password')
+        updated_user = serializer.save()
+        if password:
+            updated_user.set_password(password)
+            updated_user.save(update_fields=['password'])
+        return Response(UserSerializer(updated_user, context={'request': request}).data)
+
+    return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def users_create(request):
-    """Public endpoint for user signup"""
-    
+    """Public signup endpoint."""
     plain_password = request.data.get('password')
-
     serializer = CreateUserSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
 
-        # Cache password for verification flow
-        cache_key = f'user_password_{user.id}'
-        cache.set(cache_key, plain_password, 86400)
+        # Cache plain password for the email-verification flow (24 h)
+        cache.set(f'user_password_{user.id}', plain_password, 86400)
 
-        print(f"✅ New user created: {user.username} ({user.email})")
-
+        logger.info("New user created: %s (%s)", user.username, user.email)
         user_data = UserSerializer(user, context={'request': request}).data
-
         return Response({
             **user_data,
             'message': 'Account created successfully! Please check your email to verify your account.',
-            'verification_required': True
+            'verification_required': True,
         }, status=status.HTTP_201_CREATED)
 
     return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -71,221 +135,63 @@ def users_create(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def users_list(request):
-    """Protected endpoint for listing users"""
-
-    limit = int(request.GET.get('limit', 50))
+    """Protected — list users (paginated)."""
+    limit  = int(request.GET.get('limit', 50))
     offset = int(request.GET.get('offset', 0))
-
-    users = User.objects.all()[offset:offset + limit]
+    users  = User.objects.all()[offset:offset + limit]
     serializer = UserSerializer(users, many=True, context={'request': request})
-
     return Response(serializer.data)
-
-
-@api_view(['PATCH', 'GET'])
-def get_or_update_track(request, track_id):
-    """Combined endpoint for GET and PATCH on tracks"""
-    track = get_object_or_404(Track, id=track_id)
-    
-    if request.method == 'GET':
-        serializer = TrackSerializer(track)
-        return Response(serializer.data)
-    
-    elif request.method == 'PATCH':
-        serializer = UpdateTrackSerializer(track, data=request.data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            track_data = TrackSerializer(track).data
-            return Response(track_data)
-        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-
-
-@api_view(['DELETE'])
-def delete_track_method(request, track_id):
-    """Separate DELETE endpoint"""
-    track = get_object_or_404(Track, id=track_id)
-    track.delete()
-    return Response({'success': True})
-
-
-@api_view(['POST', 'DELETE'])
-def like_track(request, track_id):
-    """Combined endpoint for creating and deleting likes"""
-    if request.method == 'POST':
-        user_id = request.data.get('userId')
-        if not user_id:
-            return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        user = get_object_or_404(User, id=user_id)
-        track = get_object_or_404(Track, id=track_id)
-        
-        # Check if already liked
-        like, created = Like.objects.get_or_create(user=user, track=track)
-        
-        if created:
-            # Increment track likes
-            track.likes += 1
-            track.save()
-        
-        serializer = LikeSerializer(like)
-        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-    
-    elif request.method == 'DELETE':
-        user_id = request.data.get('userId')
-        if not user_id:
-            return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        user = get_object_or_404(User, id=user_id)
-        track = get_object_or_404(Track, id=track_id)
-        
-        try:
-            like = Like.objects.get(user=user, track=track)
-            like.delete()
-            
-            # Decrement track likes
-            track.likes = max(0, track.likes - 1)
-            track.save()
-            
-            return Response({'success': True})
-        except Like.DoesNotExist:
-            return Response({'error': 'Like not found'}, status=status.HTTP_404_NOT_FOUND)
-
-
-@api_view(['POST', 'DELETE'])
-def follow_user(request, user_id):
-    """Combined endpoint for following and unfollowing"""
-    if request.method == 'POST':
-        follower_id = request.data.get('followerId')
-        if not follower_id:
-            return Response({'error': 'followerId is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        follower = get_object_or_404(User, id=follower_id)
-        following = get_object_or_404(User, id=user_id)
-        
-        # Check if already following
-        follow, created = Follow.objects.get_or_create(follower=follower, following=following)
-        
-        serializer = FollowSerializer(follow)
-        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
-    
-    elif request.method == 'DELETE':
-        follower_id = request.data.get('followerId')
-        if not follower_id:
-            return Response({'error': 'followerId is required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            follow = Follow.objects.get(follower_id=follower_id, following_id=user_id)
-            follow.delete()
-            return Response({'success': True})
-        except Follow.DoesNotExist:
-            return Response({'error': 'Follow not found'}, status=status.HTTP_404_NOT_FOUND)
-
-
-@api_view(['PATCH', 'GET'])
-@parser_classes([MultiPartParser, FormParser, JSONParser])  # ← handles file uploads
-def get_or_update_user(request, user_id):
-    """Combined endpoint for GET and PATCH on users"""
-
-    user = get_object_or_404(User, id=user_id)
-
-    # 🔒 SECURITY: only allow owner to modify profile
-    if request.method == 'PATCH' or request.method == 'GET':
-        if request.user != user:
-            return Response(
-                {"error": "You are not allowed to access this profile."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-
-    if request.method == 'GET':
-        serializer = UserSerializer(user, context={'request': request})
-        return Response(serializer.data)
-
-    elif request.method == 'PATCH':
-        serializer = UserSerializer(
-            user,
-            data=request.data,
-            partial=True,
-            context={'request': request}
-        )
-
-        if serializer.is_valid():
-            password = request.data.get('password')
-
-            user = serializer.save()
-
-            # 🔐 Proper password hashing
-            if password:
-                user.set_password(password)
-                user.save()
-
-            return Response(
-                UserSerializer(user, context={'request': request}).data
-            )
-
-        return Response(
-            {'error': serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST
-        )
 
 
 @api_view(['GET'])
 def get_user_stats(request, user_id):
-    user = get_object_or_404(User, id=user_id)
-    
-    # Get user's tracks
+    user   = get_object_or_404(User, id=user_id)
     tracks = Track.objects.filter(user=user)
-    
-    # Calculate stats
-    total_plays = tracks.aggregate(Sum('plays'))['plays__sum'] or 0
-    total_likes = tracks.aggregate(Sum('likes'))['likes__sum'] or 0
+
+    total_plays     = tracks.aggregate(Sum('plays'))['plays__sum'] or 0
+    total_likes     = tracks.aggregate(Sum('likes'))['likes__sum'] or 0
     total_downloads = tracks.aggregate(Sum('downloads'))['downloads__sum'] or 0
     total_followers = Follow.objects.filter(following=user).count()
     total_following = Follow.objects.filter(follower=user).count()
-    
-    # Monthly listeners (unique users in last 30 days)
-    thirty_days_ago = timezone.now() - timedelta(days=30)
-    track_ids = tracks.values_list('id', flat=True)
+
+    thirty_days_ago  = timezone.now() - timedelta(days=30)
+    track_ids        = tracks.values_list('id', flat=True)
     monthly_listeners = Play.objects.filter(
         track_id__in=track_ids,
-        created_at__gte=thirty_days_ago
+        created_at__gte=thirty_days_ago,
     ).values('user').distinct().count()
-    
+
     stats = {
-        'user_id': str(user.id),
-        'total_tracks': tracks.count(),
-        'total_plays': total_plays,
-        'total_likes': total_likes,
-        'total_downloads': total_downloads,
-        'total_followers': total_followers,
-        'total_following': total_following,
+        'user_id':           str(user.id),
+        'total_tracks':      tracks.count(),
+        'total_plays':       total_plays,
+        'total_likes':       total_likes,
+        'total_downloads':   total_downloads,
+        'total_followers':   total_followers,
+        'total_following':   total_following,
         'monthly_listeners': monthly_listeners,
-        'updated_at': timezone.now()
+        'updated_at':        timezone.now(),
     }
-    
-    serializer = UserStatsSerializer(stats)
-    return Response(serializer.data)
+    return Response(UserStatsSerializer(stats).data)
 
 
 @api_view(['GET'])
 def get_artists(request):
-    """Get users who have published tracks"""
+    """Users who have at least one published track."""
     artist_ids = Track.objects.values_list('user', flat=True).distinct()
-    artists = User.objects.filter(id__in=artist_ids)
-    serializer = UserSerializer(artists, many=True)
-    return Response(serializer.data)
+    artists    = User.objects.filter(id__in=artist_ids)
+    return Response(PublicUserSerializer(artists, many=True, context={'request': request}).data)
 
 
 # ============================================================================
 # TRACKS
 # ============================================================================
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def tracks_list(request):
-    """Public endpoint for listing tracks"""
-
     tracks = Track.objects.all()
 
-    # Filters
     user_id = request.GET.get('userId')
     if user_id:
         tracks = tracks.filter(user_id=user_id)
@@ -300,8 +206,7 @@ def tracks_list(request):
 
     tags = request.GET.get('tags')
     if tags:
-        tag_list = tags.split(',')
-        for tag in tag_list:
+        for tag in tags.split(','):
             tracks = tracks.filter(tags__contains=tag)
 
     published = request.GET.get('published')
@@ -310,179 +215,142 @@ def tracks_list(request):
     elif published == 'false':
         tracks = tracks.filter(published=False)
 
-    # Sorting
-    sort_by = request.GET.get('sortBy', 'created_at')
+    sort_by    = request.GET.get('sortBy', 'created_at')
     sort_order = request.GET.get('sortOrder', 'desc')
     order_field = f'-{sort_by}' if sort_order == 'desc' else sort_by
     tracks = tracks.order_by(order_field)
 
-    # Pagination
-    limit = int(request.GET.get('limit', 50))
+    limit  = int(request.GET.get('limit', 50))
     offset = int(request.GET.get('offset', 0))
     tracks = tracks[offset:offset + limit]
 
-    serializer = TrackSerializer(tracks, many=True, context={'request': request})
-    return Response(serializer.data)
+    return Response(TrackSerializer(tracks, many=True, context={'request': request}).data)
 
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def tracks_create(request):
-    """Protected endpoint for creating tracks"""
-
     serializer = CreateTrackSerializer(data=request.data)
     if serializer.is_valid():
         track = serializer.save()
-        track_data = TrackSerializer(track, context={'request': request}).data
-        return Response(track_data, status=status.HTTP_201_CREATED)
-
+        return Response(
+            TrackSerializer(track, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
     return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST', 'GET', 'PATCH', 'DELETE'])
+@api_view(['GET', 'PATCH', 'DELETE'])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def track_detail(request, track_id):
-    """Combined endpoint for all track operations"""
+    track = get_object_or_404(Track, id=track_id)
+
     if request.method == 'GET':
-        track = get_object_or_404(Track, id=track_id)
-        serializer = TrackSerializer(track, context={'request': request})
-        return Response(serializer.data)
-    
+        return Response(TrackSerializer(track, context={'request': request}).data)
+
     elif request.method == 'PATCH':
-        track = get_object_or_404(Track, id=track_id)
         serializer = UpdateTrackSerializer(track, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            track_data = TrackSerializer(track, context={'request': request}).data
-            return Response(track_data)
+            return Response(TrackSerializer(track, context={'request': request}).data)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     elif request.method == 'DELETE':
-        track = get_object_or_404(Track, id=track_id)
+        _delete_drive_file(track.audio_file)
+        _delete_drive_file(track.cover_file)
         track.delete()
         return Response({'success': True})
+
+
+@api_view(['DELETE'])
+def delete_track_method(request, track_id):
+    """Separate DELETE endpoint (kept for URL compatibility)."""
+    track = get_object_or_404(Track, id=track_id)
+    _delete_drive_file(track.audio_file)
+    _delete_drive_file(track.cover_file)
+    track.delete()
+    return Response({'success': True})
+
+
+@api_view(['GET', 'PATCH'])
+def get_or_update_track(request, track_id):
+    """Combined GET/PATCH kept for backward compatibility."""
+    track = get_object_or_404(Track, id=track_id)
+
+    if request.method == 'GET':
+        return Response(TrackSerializer(track, context={'request': request}).data)
+
+    serializer = UpdateTrackSerializer(track, data=request.data, partial=True)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(TrackSerializer(track, context={'request': request}).data)
+    return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
 def get_track_stats(request, track_id):
     track = get_object_or_404(Track, id=track_id)
     plays = Play.objects.filter(track=track)
-    
-    # Daily plays
+
     daily_plays = {}
     for play in plays:
         date = play.created_at.date().isoformat()
         daily_plays[date] = daily_plays.get(date, 0) + 1
-    
-    # Unique listeners
+
     unique_listeners = plays.values('user').distinct().count()
-    
-    # Average listen duration
-    avg_duration = plays.aggregate(Avg('duration'))['duration__avg'] or 0
-    
-    # Completion rate
-    total_plays = plays.count()
-    completed_plays = plays.filter(completed=True).count()
-    completion_rate = (completed_plays / total_plays * 100) if total_plays > 0 else 0
-    
+    avg_duration     = plays.aggregate(Avg('duration'))['duration__avg'] or 0
+    total_plays      = plays.count()
+    completed_plays  = plays.filter(completed=True).count()
+    completion_rate  = (completed_plays / total_plays * 100) if total_plays > 0 else 0
+
     stats = {
-        'track_id': str(track.id),
-        'daily_plays': daily_plays,
+        'track_id':               str(track.id),
+        'daily_plays':            daily_plays,
         'total_unique_listeners': unique_listeners,
-        'avg_listen_duration': avg_duration,
-        'completion_rate': completion_rate,
-        'updated_at': timezone.now()
+        'avg_listen_duration':    avg_duration,
+        'completion_rate':        completion_rate,
+        'updated_at':             timezone.now(),
     }
-    
-    serializer = TrackStatsSerializer(stats)
-    return Response(serializer.data)
+    return Response(TrackStatsSerializer(stats).data)
 
 
 # ============================================================================
 # LIKES
 # ============================================================================
 
-# ============================================================================
-# DOWNLOADS
-# ============================================================================
+@api_view(['POST', 'DELETE'])
+def like_track(request, track_id):
+    if request.method == 'POST':
+        user_id = request.data.get('userId')
+        if not user_id:
+            return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+        user  = get_object_or_404(User, id=user_id)
+        track = get_object_or_404(Track, id=track_id)
+        like, created = Like.objects.get_or_create(user=user, track=track)
+        if created:
+            track.likes += 1
+            track.save()
+        return Response(
+            LikeSerializer(like).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
-@api_view(['POST'])
-def create_download(request, track_id):
-    track = get_object_or_404(Track, id=track_id)
     user_id = request.data.get('userId')
-    
-    user = None
-    if user_id:
-        user = get_object_or_404(User, id=user_id)
-    
-    download = Download.objects.create(
-        user=user,
-        track=track,
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT')
-    )
-    
-    # Increment track downloads
-    track.downloads += 1
-    track.save()
-    
-    serializer = DownloadSerializer(download)
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
-@api_view(['GET'])
-def get_track_downloads(request, track_id):
-    downloads = Download.objects.filter(track_id=track_id)
-    serializer = DownloadSerializer(downloads, many=True)
-    return Response(serializer.data)
-
-
-# ============================================================================
-# PLAYS
-# ============================================================================
-
-@api_view(['POST'])
-def create_play(request, track_id):
+    if not user_id:
+        return Response({'error': 'userId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    user  = get_object_or_404(User, id=user_id)
     track = get_object_or_404(Track, id=track_id)
-    user_id = request.data.get('userId')
-    
-    user = None
-    if user_id:
-        user = get_object_or_404(User, id=user_id)
-    
-    play = Play.objects.create(
-        user=user,
-        track=track,
-        duration=request.data.get('duration', 0),
-        completed=request.data.get('completed', False),
-        ip_address=request.META.get('REMOTE_ADDR'),
-        user_agent=request.META.get('HTTP_USER_AGENT')
-    )
-    
-    # Increment track plays
-    track.plays += 1
-    track.save()
-    
-    serializer = PlaySerializer(play)
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    try:
+        like = Like.objects.get(user=user, track=track)
+        like.delete()
+        track.likes = max(0, track.likes - 1)
+        track.save()
+        return Response({'success': True})
+    except Like.DoesNotExist:
+        return Response({'error': 'Like not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
-@api_view(['GET'])
-def get_track_plays(request, track_id):
-    plays = Play.objects.filter(track_id=track_id)
-    serializer = PlaySerializer(plays, many=True)
-    return Response(serializer.data)
-
-
-@api_view(['GET'])
-def get_user_plays(request, user_id):
-    plays = Play.objects.filter(user_id=user_id)
-    serializer = PlaySerializer(plays, many=True)
-    return Response(serializer.data)
-
-
-# Keep the check like and get user likes functions
 @api_view(['GET'])
 def check_like(request, track_id, user_id):
     has_liked = Like.objects.filter(user_id=user_id, track_id=track_id).exists()
@@ -492,11 +360,98 @@ def check_like(request, track_id, user_id):
 @api_view(['GET'])
 def get_user_likes(request, user_id):
     likes = Like.objects.filter(user_id=user_id)
-    serializer = LikeSerializer(likes, many=True)
-    return Response(serializer.data)
+    return Response(LikeSerializer(likes, many=True).data)
 
 
-# Keep the check follow and get followers/following functions
+# ============================================================================
+# DOWNLOADS
+# ============================================================================
+
+@api_view(['POST'])
+def create_download(request, track_id):
+    track   = get_object_or_404(Track, id=track_id)
+    user_id = request.data.get('userId')
+    user    = get_object_or_404(User, id=user_id) if user_id else None
+
+    download = Download.objects.create(
+        user=user, track=track,
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT'),
+    )
+    track.downloads += 1
+    track.save()
+    return Response(DownloadSerializer(download).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def get_track_downloads(request, track_id):
+    downloads = Download.objects.filter(track_id=track_id)
+    return Response(DownloadSerializer(downloads, many=True).data)
+
+
+# ============================================================================
+# PLAYS
+# ============================================================================
+
+@api_view(['POST'])
+def create_play(request, track_id):
+    track   = get_object_or_404(Track, id=track_id)
+    user_id = request.data.get('userId')
+    user    = get_object_or_404(User, id=user_id) if user_id else None
+
+    play = Play.objects.create(
+        user=user, track=track,
+        duration=request.data.get('duration', 0),
+        completed=request.data.get('completed', False),
+        ip_address=request.META.get('REMOTE_ADDR'),
+        user_agent=request.META.get('HTTP_USER_AGENT'),
+    )
+    track.plays += 1
+    track.save()
+    return Response(PlaySerializer(play).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET'])
+def get_track_plays(request, track_id):
+    plays = Play.objects.filter(track_id=track_id)
+    return Response(PlaySerializer(plays, many=True).data)
+
+
+@api_view(['GET'])
+def get_user_plays(request, user_id):
+    plays = Play.objects.filter(user_id=user_id)
+    return Response(PlaySerializer(plays, many=True).data)
+
+
+# ============================================================================
+# FOLLOWS
+# ============================================================================
+
+@api_view(['POST', 'DELETE'])
+def follow_user(request, user_id):
+    if request.method == 'POST':
+        follower_id = request.data.get('followerId')
+        if not follower_id:
+            return Response({'error': 'followerId is required'}, status=status.HTTP_400_BAD_REQUEST)
+        follower  = get_object_or_404(User, id=follower_id)
+        following = get_object_or_404(User, id=user_id)
+        follow, created = Follow.objects.get_or_create(follower=follower, following=following)
+        return Response(
+            FollowSerializer(follow).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    follower_id = request.data.get('followerId')
+    if not follower_id:
+        return Response({'error': 'followerId is required'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        follow = Follow.objects.get(follower_id=follower_id, following_id=user_id)
+        follow.delete()
+        return Response({'success': True})
+    except Follow.DoesNotExist:
+        return Response({'error': 'Follow not found'}, status=status.HTTP_404_NOT_FOUND)
+
+
 @api_view(['GET'])
 def check_follow(request, user_id, follower_id):
     is_following = Follow.objects.filter(follower_id=follower_id, following_id=user_id).exists()
@@ -506,15 +461,13 @@ def check_follow(request, user_id, follower_id):
 @api_view(['GET'])
 def get_followers(request, user_id):
     follows = Follow.objects.filter(following_id=user_id)
-    serializer = FollowSerializer(follows, many=True)
-    return Response(serializer.data)
+    return Response(FollowSerializer(follows, many=True).data)
 
 
 @api_view(['GET'])
 def get_following(request, user_id):
     follows = Follow.objects.filter(follower_id=user_id)
-    serializer = FollowSerializer(follows, many=True)
-    return Response(serializer.data)
+    return Response(FollowSerializer(follows, many=True).data)
 
 
 # ============================================================================
@@ -523,55 +476,48 @@ def get_following(request, user_id):
 
 @api_view(['GET'])
 def get_user_albums(request, user_id):
-    """Get all albums for a user"""
     albums = Album.objects.filter(user_id=user_id)
-    serializer = AlbumSerializer(albums, many=True, context={'request': request})
-    return Response(serializer.data)
+    return Response(AlbumSerializer(albums, many=True, context={'request': request}).data)
 
 
 @api_view(['GET'])
 def get_album(request, album_id):
-    """Get album by ID with tracks"""
-    album = get_object_or_404(Album, id=album_id)
+    album  = get_object_or_404(Album, id=album_id)
     tracks = Track.objects.filter(album=album)
-    
-    album_data = AlbumSerializer(album, context={'request': request}).data
-    album_data['tracks'] = TrackSerializer(tracks, many=True, context={'request': request}).data
-    
-    return Response(album_data)
+    data   = AlbumSerializer(album, context={'request': request}).data
+    data['tracks'] = TrackSerializer(tracks, many=True, context={'request': request}).data
+    return Response(data)
 
 
 @api_view(['POST'])
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def create_album(request):
-    """Create a new album"""
     serializer = CreateAlbumSerializer(data=request.data)
     if serializer.is_valid():
         album = serializer.save()
-        album_data = AlbumSerializer(album, context={'request': request}).data
-        return Response(album_data, status=status.HTTP_201_CREATED)
+        return Response(
+            AlbumSerializer(album, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
     return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['PATCH'])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
 def update_album(request, album_id):
-    """Update an album"""
-    album = get_object_or_404(Album, id=album_id)
-    serializer = AlbumSerializer(album, data=request.data, partial=True)
+    album      = get_object_or_404(Album, id=album_id)
+    serializer = UpdateAlbumSerializer(album, data=request.data, partial=True)
     if serializer.is_valid():
         serializer.save()
-        return Response(serializer.data)
+        return Response(AlbumSerializer(album, context={'request': request}).data)
     return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['DELETE'])
 def delete_album(request, album_id):
-    """Delete an album"""
     album = get_object_or_404(Album, id=album_id)
-    
-    # Remove album association from tracks (don't delete the tracks)
+    _delete_drive_file(album.cover_file)
     Track.objects.filter(album=album).update(album=None)
-    
     album.delete()
     return Response({'success': True})
 
@@ -585,43 +531,33 @@ def search(request):
     query = request.GET.get('q', '').strip()
     if not query:
         return Response({'error': "Query parameter 'q' is required"}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     search_type = request.GET.get('type', 'all')
-    limit = int(request.GET.get('limit', 20))
-    
-    results = {
-        'tracks': [],
-        'users': []
-    }
-    
-    # Search tracks
+    limit       = int(request.GET.get('limit', 20))
+    results     = {'tracks': [], 'users': []}
+
     if search_type in ['tracks', 'all']:
         tracks = Track.objects.filter(
-            Q(title__icontains=query) |
-            Q(artist__icontains=query) |
-            Q(genre__icontains=query) |
-            Q(mood__icontains=query) |
+            Q(title__icontains=query) | Q(artist__icontains=query) |
+            Q(genre__icontains=query) | Q(mood__icontains=query) |
             Q(tags__icontains=query),
-            published=True
+            published=True,
         )[:limit]
         results['tracks'] = TrackSerializer(tracks, many=True).data
-    
-    # Search users
+
     if search_type in ['users', 'all']:
         users = User.objects.filter(
             Q(username__icontains=query) |
             Q(display_name__icontains=query) |
-            Q(bio__icontains=query)
+            Q(bio__icontains=query),
         )[:limit]
-        results['users'] = UserSerializer(users, many=True).data
-    
+        results['users'] = PublicUserSerializer(users, many=True).data
+
     return Response(results)
 
 
 @api_view(['POST'])
 def rebuild_search_index(request):
-    # In Django, we don't need to rebuild an index as searches are done in real-time
-    # This endpoint exists for API compatibility
     return Response({'success': True})
 
 
@@ -629,10 +565,6 @@ def rebuild_search_index(request):
 # AUDIO STREAMING AND DOWNLOAD
 # ============================================================================
 
-# stream_track is handled by TrackStreamView in stream_views.py.
-# Routed via: path('tracks/<uuid:track_id>/stream/', TrackStreamView.as_view(), ...)
-# Kept as a thin stub so any accidental direct call returns a clear error
-# rather than an AttributeError from the old FileField code.
 @api_view(['GET'])
 def stream_track(request, track_id):
     return Response(
@@ -644,68 +576,54 @@ def stream_track(request, track_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_track(request, track_id):
-    """
-    Download track as an attachment, streamed from Google Drive.
-    Increments the download count and logs the download.
-    """
     from fileforge.services.google_drive import stream_file_chunks
 
     track = get_object_or_404(Track, id=track_id)
-
     if not track.audio_file:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
 
     drive_file = track.audio_file
-    file_id = drive_file.file_id
+    file_id    = drive_file.file_id
     total_size = drive_file.size or 0
-    mime_type = drive_file.file_type or 'application/octet-stream'
+    mime_type  = drive_file.file_type or 'application/octet-stream'
+    ext        = mime_type.split('/')[-1] if '/' in mime_type else 'mp3'
+    filename   = f"{track.artist} - {track.title}.{ext}"
 
-    # Derive a clean download filename from track metadata
-    ext = (mime_type.split('/')[-1] if '/' in mime_type else 'mp3')
-    filename = f"{track.artist} - {track.title}.{ext}"
-
-    # Log the download and increment counter
     Download.objects.create(
-        user=request.user,
-        track=track,
+        user=request.user, track=track,
         ip_address=request.META.get('REMOTE_ADDR'),
         user_agent=request.META.get('HTTP_USER_AGENT', ''),
     )
     track.downloads += 1
     track.save(update_fields=['downloads'])
 
-    def _chunks():
-        yield from stream_file_chunks(file_id, start=0, end=total_size - 1)
-
-    response = StreamingHttpResponse(_chunks(), content_type=mime_type)
-    response['Content-Length'] = total_size
+    response = StreamingHttpResponse(
+        (chunk for chunk in stream_file_chunks(file_id, start=0, end=total_size - 1)),
+        content_type=mime_type,
+    )
+    response['Content-Length']      = total_size
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 
 @api_view(['GET'])
 def get_track_stream_url(request, track_id):
-    """
-    Return the streaming URL for a track without actually streaming.
-    Useful for frontend players that need the URL upfront.
-    """
     track = get_object_or_404(Track, id=track_id)
-
     if not track.audio_file:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
 
     drive_file = track.audio_file
     stream_url = request.build_absolute_uri(f'/api/tracks/{track_id}/stream/')
-    mime_type = drive_file.file_type or ''
-    fmt = mime_type.split('/')[-1] if '/' in mime_type else (track.audio_format or 'mp3')
+    mime_type  = drive_file.file_type or ''
+    fmt        = mime_type.split('/')[-1] if '/' in mime_type else (track.audio_format or 'mp3')
 
     return Response({
-        'id': str(track.id),
-        'title': track.title,
-        'artist': track.artist,
+        'id':         str(track.id),
+        'title':      track.title,
+        'artist':     track.artist,
         'stream_url': stream_url,
-        'duration': track.audio_duration,
-        'format': fmt,
+        'duration':   track.audio_duration,
+        'format':     fmt,
     })
 
 
@@ -715,137 +633,115 @@ def get_track_stream_url(request, track_id):
 
 @api_view(['GET', 'POST'])
 def playlists_list_or_create(request):
-    """Handle both listing playlists and creating new playlists"""
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
     if request.method == 'GET':
-        if not request.user.is_authenticated:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-        
-        playlists = Playlist.objects.filter(user=request.user).prefetch_related('playlist_tracks__track')
+        playlists  = Playlist.objects.filter(user=request.user).prefetch_related('playlist_tracks__track')
         serializer = PlaylistSerializer(playlists, many=True, context={'request': request})
         return Response(serializer.data)
-    
-    elif request.method == 'POST':
-        if not request.user.is_authenticated:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-        
-        serializer = PlaylistSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            serializer.save(user=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = PlaylistSerializer(data=request.data, context={'request': request})
+    if serializer.is_valid():
+        serializer.save(user=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET', 'PATCH', 'DELETE'])
 def playlist_detail(request, playlist_id):
-    """Combined endpoint for GET, PATCH, and DELETE on playlists"""
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
-    
+
     if request.method == 'GET':
-        serializer = PlaylistDetailSerializer(playlist, context={'request': request})
-        return Response(serializer.data)
-    
+        return Response(PlaylistDetailSerializer(playlist, context={'request': request}).data)
+
     elif request.method == 'PATCH':
         serializer = PlaylistSerializer(playlist, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-    
-    elif request.method == 'DELETE':
-        playlist.delete()
-        return Response({'success': True})
+
+    playlist.delete()
+    return Response({'success': True})
 
 
 @api_view(['POST'])
 def add_track_to_playlist(request, playlist_id):
-    """Add a track to a playlist"""
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
     track_id = request.data.get('track_id')
-    
     if not track_id:
         return Response({'error': 'track_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     track = get_object_or_404(Track, id=track_id)
-    
     if PlaylistTrack.objects.filter(playlist=playlist, track=track).exists():
         return Response({'error': 'Track already exists in playlist'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    max_order = PlaylistTrack.objects.filter(playlist=playlist).aggregate(Max('order'))['order__max']
+
+    max_order  = PlaylistTrack.objects.filter(playlist=playlist).aggregate(Max('order'))['order__max']
     next_order = 0 if max_order is None else max_order + 1
-    
-    playlist_track = PlaylistTrack.objects.create(
-        playlist=playlist,
-        track=track,
-        order=next_order
-    )
-    
-    serializer = PlaylistTrackSerializer(playlist_track, context={'request': request})
-    return Response(serializer.data, status=status.HTTP_201_CREATED)
+    pt         = PlaylistTrack.objects.create(playlist=playlist, track=track, order=next_order)
+    return Response(PlaylistTrackSerializer(pt, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
 def remove_track_from_playlist(request, playlist_id):
-    """Remove a track from a playlist"""
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
     track_id = request.data.get('track_id')
-    
     if not track_id:
         return Response({'error': 'track_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     try:
-        playlist_track = PlaylistTrack.objects.get(playlist=playlist, track_id=track_id)
+        pt = PlaylistTrack.objects.get(playlist=playlist, track_id=track_id)
     except PlaylistTrack.DoesNotExist:
         return Response({'error': 'Track not found in playlist'}, status=status.HTTP_404_NOT_FOUND)
-    
-    playlist_track.delete()
+
+    pt.delete()
     return Response({'success': True})
 
 
 @api_view(['POST'])
 def reorder_playlist_tracks(request, playlist_id):
-    """Reorder tracks in a playlist"""
     if not request.user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-    
+
     playlist = get_object_or_404(Playlist, id=playlist_id, user=request.user)
-    payload = request.data
-    
+    payload  = request.data
+
     if not isinstance(payload, list):
         return Response({'error': 'Payload must be a list of {"id", "order"} objects'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     ids = [item.get('id') for item in payload if isinstance(item, dict)]
     if len(ids) != len(payload) or None in ids:
         return Response({'error': 'Each item must contain an "id" field'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     order_values = [item.get('order') for item in payload]
-    if any(not isinstance(order, int) for order in order_values):
+    if any(not isinstance(o, int) for o in order_values):
         return Response({'error': 'Each "order" must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     if len(order_values) != len(set(order_values)):
         return Response({'error': 'Duplicate order values are not allowed'}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     playlist_tracks = PlaylistTrack.objects.filter(playlist=playlist, id__in=ids)
     if playlist_tracks.count() != len(ids):
         return Response({'error': 'One or more playlist track entries are invalid'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    track_map = {str(item.id): item for item in playlist_tracks}
-    updates = []
+
+    track_map = {str(pt.id): pt for pt in playlist_tracks}
+    updates   = []
     for item in payload:
-        item_id = str(item['id'])
-        playlist_track = track_map.get(item_id)
-        if not playlist_track:
-            return Response({'error': f'Invalid playlist track id: {item_id}'}, status=status.HTTP_400_BAD_REQUEST)
-        playlist_track.order = item['order']
-        updates.append(playlist_track)
-    
+        pt = track_map.get(str(item['id']))
+        if not pt:
+            return Response({'error': f'Invalid playlist track id: {item["id"]}'}, status=status.HTTP_400_BAD_REQUEST)
+        pt.order = item['order']
+        updates.append(pt)
+
     PlaylistTrack.objects.bulk_update(updates, ['order'])
     return Response({'success': True})

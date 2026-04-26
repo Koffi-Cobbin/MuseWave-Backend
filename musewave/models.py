@@ -2,8 +2,7 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.contrib.auth.base_user import BaseUserManager
 from django.utils import timezone
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator, URLValidator
-from django.utils import timezone
+from django.core.validators import MinValueValidator
 import uuid
 
 
@@ -11,87 +10,87 @@ class UserManager(BaseUserManager):
     def create_user(self, email, username, password=None, **extra_fields):
         if not email:
             raise ValueError("Users must have an email address")
-
         email = self.normalize_email(email)
-
-        user = self.model(
-            email=email,
-            username=username,
-            **extra_fields
-        )
-
+        user = self.model(email=email, username=username, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
-
         return user
 
     def create_superuser(self, email, username, password=None, **extra_fields):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
-
         if extra_fields.get("is_staff") is not True:
             raise ValueError("Superuser must have is_staff=True")
-
         if extra_fields.get("is_superuser") is not True:
             raise ValueError("Superuser must have is_superuser=True")
-
         return self.create_user(email, username, password, **extra_fields)
-
 
 
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
-    username = models.CharField(max_length=30, unique=True)
-    email = models.EmailField(unique=True)
-
+    username     = models.CharField(max_length=30, unique=True)
+    email        = models.EmailField(unique=True)
     display_name = models.CharField(max_length=100, blank=True, null=True)
-    bio = models.TextField(max_length=500, blank=True, null=True)
+    bio          = models.TextField(max_length=500, blank=True, null=True)
 
-    # Changed from URLField to ImageField to support file uploads from frontend
-    avatar_file = models.ImageField(upload_to='users/avatars/%Y/%m/', blank=True, null=True)
-    header_file = models.ImageField(upload_to='users/headers/%Y/%m/', blank=True, null=True)
+    # ── Profile images stored in Google Drive via fileforge ──────────────────
+    avatar_file = models.OneToOneField(
+        'fileforge.DriveFile',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='user_avatar',
+    )
+    header_file = models.OneToOneField(
+        'fileforge.DriveFile',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='user_header',
+    )
 
-    location = models.CharField(max_length=100, blank=True, null=True)
-    website = models.URLField(blank=True, null=True)
-
-    twitter = models.CharField(max_length=100, blank=True, null=True)
+    location  = models.CharField(max_length=100, blank=True, null=True)
+    website   = models.URLField(blank=True, null=True)
+    twitter   = models.CharField(max_length=100, blank=True, null=True)
     instagram = models.CharField(max_length=100, blank=True, null=True)
-    spotify = models.CharField(max_length=100, blank=True, null=True)
+    spotify   = models.CharField(max_length=100, blank=True, null=True)
     soundcloud = models.CharField(max_length=100, blank=True, null=True)
 
-    verified = models.BooleanField(default=False)
-
-    is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)
-
+    verified   = models.BooleanField(default=False)
+    is_active  = models.BooleanField(default=True)
+    is_staff   = models.BooleanField(default=False)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
-    USERNAME_FIELD = "email"
+    USERNAME_FIELD  = "email"
     REQUIRED_FIELDS = ["username"]
-
     objects = UserManager()
 
     class Meta:
         db_table = "users"
 
 
-
 class Album(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='albums')
-    title = models.CharField(max_length=200)
-    artist = models.CharField(max_length=200)
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='albums')
+    title       = models.CharField(max_length=200)
+    artist      = models.CharField(max_length=200)
     description = models.TextField(max_length=2000, blank=True, null=True)
-    cover_file = models.ImageField(upload_to='albums/covers/%Y/%m/', blank=True, null=True)
+
+    # ── Cover image stored in Google Drive via fileforge ─────────────────────
+    cover_file = models.OneToOneField(
+        'fileforge.DriveFile',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='album_cover',
+    )
+
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
-    release_date = models.DateTimeField()
-    genre = models.CharField(max_length=50)
-    published = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    release_date   = models.DateTimeField()
+    genre          = models.CharField(max_length=50)
+    published      = models.BooleanField(default=False)
+    created_at     = models.DateTimeField(auto_now_add=True)
+    updated_at     = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'albums'
@@ -102,48 +101,51 @@ class Album(models.Model):
 
 
 class Track(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracks')
-    album = models.ForeignKey(Album, on_delete=models.SET_NULL, null=True, blank=True, related_name='tracks')
-    title = models.CharField(max_length=200)
-    artist = models.CharField(max_length=200)
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tracks')
+    album       = models.ForeignKey(Album, on_delete=models.SET_NULL, null=True, blank=True, related_name='tracks')
+    title       = models.CharField(max_length=200)
+    artist      = models.CharField(max_length=200)
     artist_slug = models.SlugField(max_length=200)
     description = models.TextField(max_length=2000, blank=True, null=True)
-    genre = models.CharField(max_length=50)
-    mood = models.CharField(max_length=50, blank=True, null=True)
-    tags = models.JSONField(default=list, blank=True)
-    
-    # File information — stored in Google Drive via fileforge
+    genre       = models.CharField(max_length=50)
+    mood        = models.CharField(max_length=50, blank=True, null=True)
+    tags        = models.JSONField(default=list, blank=True)
+
+    # ── Audio file stored in Google Drive via fileforge ───────────────────────
     audio_file = models.OneToOneField(
         'fileforge.DriveFile',
         on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
+        null=True, blank=True,
         related_name='track',
     )
-    audio_file_size = models.BigIntegerField(null=True, blank=True)  # mirrored from DriveFile.size on upload
-    audio_duration = models.FloatField()  # seconds
-    audio_format = models.CharField(max_length=20, blank=True, null=True)  # mirrored from DriveFile.file_type on upload
-    
-    cover_file = models.ImageField(upload_to='tracks/covers/%Y/%m/', blank=True, null=True)
+    audio_file_size = models.BigIntegerField(null=True, blank=True)
+    audio_duration  = models.FloatField()          # required — must be supplied by client
+    audio_format    = models.CharField(max_length=20, blank=True, null=True)
+
+    # ── Cover image stored in Google Drive via fileforge ──────────────────────
+    cover_file = models.OneToOneField(
+        'fileforge.DriveFile',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='track_cover',
+    )
+
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
-    waveform_data = models.TextField(blank=True, null=True)  # JSON string
-    
-    # Metadata
+    waveform_data  = models.TextField(blank=True, null=True)  # JSON string
+
     bpm = models.IntegerField(blank=True, null=True, validators=[MinValueValidator(1)])
-    key = models.CharField(max_length=10, blank=True, null=True)  # Musical key
-    
-    # Stats
-    plays = models.IntegerField(default=0)
-    likes = models.IntegerField(default=0)
+    key = models.CharField(max_length=10, blank=True, null=True)
+
+    plays     = models.IntegerField(default=0)
+    likes     = models.IntegerField(default=0)
     downloads = models.IntegerField(default=0)
-    shares = models.IntegerField(default=0)
-    
-    # Status
-    published = models.BooleanField(default=False)
+    shares    = models.IntegerField(default=0)
+
+    published    = models.BooleanField(default=False)
     published_at = models.DateTimeField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'tracks'
@@ -160,9 +162,9 @@ class Track(models.Model):
 
 
 class Like(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='likes')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_likes')
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='likes')
+    track      = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_likes')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -175,9 +177,9 @@ class Like(models.Model):
 
 
 class Download(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='downloads')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_downloads')
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='downloads')
+    track      = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_downloads')
     ip_address = models.GenericIPAddressField(blank=True, null=True)
     user_agent = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -191,11 +193,11 @@ class Download(models.Model):
 
 
 class Play(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='plays')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_plays')
-    duration = models.FloatField(default=0)  # How long they listened in seconds
-    completed = models.BooleanField(default=False)  # Did they listen to >80%?
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user       = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='plays')
+    track      = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='track_plays')
+    duration   = models.FloatField(default=0)
+    completed  = models.BooleanField(default=False)
     ip_address = models.GenericIPAddressField(blank=True, null=True)
     user_agent = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -209,9 +211,9 @@ class Play(models.Model):
 
 
 class Follow(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    follower = models.ForeignKey(User, on_delete=models.CASCADE, related_name='following')
-    following = models.ForeignKey(User, on_delete=models.CASCADE, related_name='followers')
+    id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    follower   = models.ForeignKey(User, on_delete=models.CASCADE, related_name='following')
+    following  = models.ForeignKey(User, on_delete=models.CASCADE, related_name='followers')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -224,14 +226,14 @@ class Follow(models.Model):
 
 
 class Playlist(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='playlists')
-    name = models.CharField(max_length=200)
+    id          = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='playlists')
+    name        = models.CharField(max_length=200)
     description = models.TextField(max_length=1000, blank=True, null=True)
-    cover_url = models.URLField(blank=True, null=True)
-    public = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    cover_url   = models.URLField(blank=True, null=True)
+    public      = models.BooleanField(default=True)
+    created_at  = models.DateTimeField(auto_now_add=True)
+    updated_at  = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'playlists'
@@ -242,11 +244,11 @@ class Playlist(models.Model):
 
 
 class PlaylistTrack(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id       = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     playlist = models.ForeignKey(Playlist, on_delete=models.CASCADE, related_name='playlist_tracks')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_entries')
+    track    = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='playlist_entries')
     added_at = models.DateTimeField(auto_now_add=True)
-    order = models.IntegerField(default=0)
+    order    = models.IntegerField(default=0)
 
     class Meta:
         unique_together = [('playlist', 'track'), ('playlist', 'order')]
@@ -257,12 +259,12 @@ class PlaylistTrack(models.Model):
 
 
 class Comment(models.Model):
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
-    track = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='comments')
-    content = models.CharField(max_length=500)
-    timestamp = models.FloatField(blank=True, null=True)  # Position in track (seconds)
-    likes = models.IntegerField(default=0)
+    id        = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user      = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    track     = models.ForeignKey(Track, on_delete=models.CASCADE, related_name='comments')
+    content   = models.CharField(max_length=500)
+    timestamp = models.FloatField(blank=True, null=True)
+    likes     = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

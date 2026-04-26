@@ -33,6 +33,7 @@ FOLDER_TREE = {
                 "name": "Users",
                 "children": {
                     "user_avatar": {"name": "Avatars"},
+                    "user_header": {"name": "Headers"},   # ← new
                 },
             },
         },
@@ -123,7 +124,7 @@ def ensure_base_structure() -> dict[str, str]:
             _set_cached(section_key, section_id)
         folder_ids[section_key] = section_id
 
-        # Third-level: Audio, Covers, Avatars (keyed by category string)
+        # Third-level: Audio, Covers, Avatars, Headers (keyed by category string)
         for cat_key, cat in section.get("children", {}).items():
             cat_cached = _get_cached(cat_key)
             if cat_cached:

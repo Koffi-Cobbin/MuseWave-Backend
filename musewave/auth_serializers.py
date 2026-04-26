@@ -1,3 +1,6 @@
+
+python
+
 """
 Authentication Serializers for MuseWave API
 Handles login, password change, and password reset functionality
@@ -8,81 +11,62 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from musewave.models import User
 from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.tokens import default_token_generator
-from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
-
-
+from django.utils.encoding import force_bytes
 
 User = get_user_model()
 
 
 class LoginSerializer(serializers.Serializer):
-    """
-    Login serializer supporting username OR email
-    """
-
+    """Login serializer supporting username OR email."""
     username_or_email = serializers.CharField(required=True)
     password = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={"input_type": "password"},
+        required=True, write_only=True, style={'input_type': 'password'}
     )
 
     def validate(self, attrs):
-        print("Validating LoginSerializer with attrs:", attrs)
-
-        username_or_email = attrs.get("username_or_email")
-        password = attrs.get("password")
-
-        print("Username_or_email ", username_or_email)
-        print("Password ", password)
+        username_or_email = attrs.get('username_or_email')
+        password          = attrs.get('password')
 
         if not username_or_email or not password:
-            raise serializers.ValidationError(
-                _("Must include username/email and password")
-            )
+            raise serializers.ValidationError(_('Must include username/email and password'))
 
-        # Single Query to find user by username OR email (case-insensitive)
         user = User.objects.filter(
-            Q(username=username_or_email) |
-            Q(email=username_or_email)
+            Q(username=username_or_email) | Q(email=username_or_email)
         ).first()
 
         if not user:
-            raise serializers.ValidationError(_("Invalid credentials"))
+            raise serializers.ValidationError(_('Invalid credentials'))
 
-        # SAFE AUTHENTICATION (Works With Custom USERNAME_FIELD)
         authenticated_user = authenticate(
-            request=self.context.get("request"),
+            request=self.context.get('request'),
             username=user.get_username(),
-            password=password
+            password=password,
         )
 
         if not authenticated_user:
-            raise serializers.ValidationError(_("Invalid credentials"))
+            raise serializers.ValidationError(_('Invalid credentials'))
 
         if not authenticated_user.is_active:
-            raise serializers.ValidationError(_("User account is disabled"))
+            raise serializers.ValidationError(_('User account is disabled'))
 
-        attrs["user"] = authenticated_user
+        attrs['user'] = authenticated_user
         return attrs
 
 
 class UserDetailSerializer(serializers.ModelSerializer):
     """
-    Serializer for user details in authentication responses.
-    Mirrors the main UserSerializer so avatar_url / header_url are always
-    built from the stored ImageField files, not bare URL columns.
+    Serializer for user details returned in authentication responses.
+    Returns Drive-backed URLs for avatar and header (same as UserSerializer).
     """
     social_links = serializers.SerializerMethodField()
-    avatar_url = serializers.SerializerMethodField()
-    header_url = serializers.SerializerMethodField()
+    avatar_url   = serializers.SerializerMethodField()
+    header_url   = serializers.SerializerMethodField()
 
     class Meta:
-        model = User
+        model  = User
         fields = [
             'id', 'username', 'email', 'display_name', 'bio',
             'avatar_url', 'header_url', 'location', 'website',
@@ -90,80 +74,64 @@ class UserDetailSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def _drive_url(self, drive_file):
+        if not drive_file:
+            return None
+        url     = drive_file.stream_url
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
     def get_avatar_url(self, obj):
-        if obj.avatar_file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.avatar_file.url)
-            return obj.avatar_file.url
-        return None
+        return self._drive_url(obj.avatar_file)
 
     def get_header_url(self, obj):
-        if obj.header_file:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.header_file.url)
-            return obj.header_file.url
-        return None
+        return self._drive_url(obj.header_file)
 
     def get_social_links(self, obj):
         return {
-            'twitter': obj.twitter,
-            'instagram': obj.instagram,
-            'spotify': obj.spotify,
+            'twitter':    obj.twitter,
+            'instagram':  obj.instagram,
+            'spotify':    obj.spotify,
             'soundcloud': obj.soundcloud,
         }
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    """
-    Serializer for password change endpoint
-    """
     old_password = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
+        required=True, write_only=True, style={'input_type': 'password'}
     )
     new_password = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
+        required=True, write_only=True, style={'input_type': 'password'}
     )
     new_password_confirm = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
+        required=True, write_only=True, style={'input_type': 'password'}
     )
 
     def validate_old_password(self, value):
         user = self.context['request'].user
         if not user.check_password(value):
-            raise serializers.ValidationError(
-                _('Current password is incorrect')
-            )
+            raise serializers.ValidationError(_('Current password is incorrect'))
         return value
 
     def validate(self, attrs):
-        new_password = attrs.get('new_password')
+        new_password         = attrs.get('new_password')
         new_password_confirm = attrs.get('new_password_confirm')
 
         if new_password != new_password_confirm:
-            raise serializers.ValidationError({
-                'new_password_confirm': _('Passwords do not match')
-            })
+            raise serializers.ValidationError(
+                {'new_password_confirm': _('Passwords do not match')}
+            )
 
         user = self.context['request'].user
         try:
             validate_password(new_password, user)
         except ValidationError as e:
-            raise serializers.ValidationError({
-                'new_password': list(e.messages)
-            })
+            raise serializers.ValidationError({'new_password': list(e.messages)})
 
         if attrs.get('old_password') == new_password:
-            raise serializers.ValidationError({
-                'new_password': _('New password must be different from current password')
-            })
+            raise serializers.ValidationError(
+                {'new_password': _('New password must be different from current password')}
+            )
 
         return attrs
 
@@ -175,9 +143,6 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
-    """
-    Serializer for password reset request
-    """
     email = serializers.EmailField(required=True)
 
     def validate_email(self, value):
@@ -190,47 +155,28 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    """
-    Serializer for password reset confirmation
-    """
-    uid = serializers.CharField(required=True)
-    token = serializers.CharField(required=True)
-    new_password = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
-    )
-    new_password_confirm = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
-    )
+    uid                  = serializers.CharField(required=True)
+    token                = serializers.CharField(required=True)
+    new_password         = serializers.CharField(required=True, write_only=True, style={'input_type': 'password'})
+    new_password_confirm = serializers.CharField(required=True, write_only=True, style={'input_type': 'password'})
 
     def validate(self, attrs):
         try:
-            uid = urlsafe_base64_decode(attrs['uid']).decode()
+            uid  = urlsafe_base64_decode(attrs['uid']).decode()
             user = User.objects.get(pk=uid)
         except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            raise serializers.ValidationError({
-                'uid': _('Invalid reset link')
-            })
+            raise serializers.ValidationError({'uid': _('Invalid reset link')})
 
         if not default_token_generator.check_token(user, attrs['token']):
-            raise serializers.ValidationError({
-                'token': _('Invalid or expired reset link')
-            })
+            raise serializers.ValidationError({'token': _('Invalid or expired reset link')})
 
         if attrs['new_password'] != attrs['new_password_confirm']:
-            raise serializers.ValidationError({
-                'new_password_confirm': _('Passwords do not match')
-            })
+            raise serializers.ValidationError({'new_password_confirm': _('Passwords do not match')})
 
         try:
             validate_password(attrs['new_password'], user)
         except ValidationError as e:
-            raise serializers.ValidationError({
-                'new_password': list(e.messages)
-            })
+            raise serializers.ValidationError({'new_password': list(e.messages)})
 
         attrs['user'] = user
         return attrs
