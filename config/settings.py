@@ -236,11 +236,10 @@ FRONTEND_URL = 'https://muse-wave.web.app'
 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'musewave-cache',
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'django_cache',  # table name
     }
 }
-
 
 # ============================================================================
 # DJANGO-Q2  (replaces Celery — uses the ORM as its broker, no Redis needed)
