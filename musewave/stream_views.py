@@ -8,7 +8,7 @@ Include this in music/urls.py.
 import re
 
 from django.http import StreamingHttpResponse
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -17,7 +17,7 @@ from fileforge.services.google_drive import get_file as drive_get_meta, stream_f
 
 
 class TrackStreamView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request, track_id):
         from musewave.models import Track  # local import to avoid circular

@@ -13,7 +13,7 @@ from django.http import StreamingHttpResponse
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -180,8 +180,7 @@ class DriveFileViewSet(ModelViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # ── Stream ────────────────────────────────────────────────────────────────
-    # permission_classes=[IsAuthenticated]
-    @action(detail=True, methods=["get"], url_path="stream")
+    @action(detail=True, methods=["get"], url_path="stream", permission_classes=[AllowAny])
     def stream(self, request, pk=None):
         """
         Proxy stream a Drive file with HTTP Range support for seeking.
