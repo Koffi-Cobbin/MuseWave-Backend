@@ -56,11 +56,9 @@ class LoginSerializer(serializers.Serializer):
 class UserDetailSerializer(serializers.ModelSerializer):
     """
     Serializer for user details returned in authentication responses.
-    Returns Drive-backed URLs for avatar and header (same as UserSerializer).
+    Returns avatar and header URLs directly (same as UserSerializer).
     """
     social_links = serializers.SerializerMethodField()
-    avatar_url   = serializers.SerializerMethodField()
-    header_url   = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
@@ -70,19 +68,6 @@ class UserDetailSerializer(serializers.ModelSerializer):
             'social_links', 'verified', 'created_at', 'updated_at',
         ]
         read_only_fields = fields
-
-    def _drive_url(self, drive_file):
-        if not drive_file:
-            return None
-        url     = drive_file.stream_url
-        request = self.context.get('request')
-        return request.build_absolute_uri(url) if request else url
-
-    def get_avatar_url(self, obj):
-        return self._drive_url(obj.avatar_file)
-
-    def get_header_url(self, obj):
-        return self._drive_url(obj.header_file)
 
     def get_social_links(self, obj):
         return {
