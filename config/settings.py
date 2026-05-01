@@ -312,7 +312,7 @@ APPEND_SLASH = False
 
 FILEFORGE_BASE_URL = os.getenv("FILEFORGE_BASE_URL", "https://fileforge1.pythonanywhere.com")
 # Replace with a real API key from the FileForge developer console.
-FILEFORGE_API_KEY  = os.getenv("FILEFORGE_API_KEY", "ffk_dummy_key_replace_me")
+FILEFORGE_API_KEY  = os.getenv("FILEFORGE_API_KEY", "ffk_AoMRLwITo1-2SZVDf9Sgful-AOIqc5mLljPO_10y")
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:

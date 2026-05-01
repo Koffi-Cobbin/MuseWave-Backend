@@ -3,7 +3,6 @@ FileForge client for MuseWave.
 
 Base URL  : configured via settings.FILEFORGE_BASE_URL
 Auth      : Bearer token from settings.FILEFORGE_API_KEY
-Docs      : https://fileforge1.pythonanywhere.com
 
 Public API
 ----------
