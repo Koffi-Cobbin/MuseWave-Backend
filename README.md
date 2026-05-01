@@ -1,142 +1,239 @@
-# Django Music Backend
+# MuseWave — Django Music Backend
 
-A Django REST framework backend for a music streaming platform, providing a complete API for user management, track management, social features (likes, follows), and analytics.
+A Django REST Framework backend for a music streaming platform. Provides a complete API for user management, track and album management, file uploads, social features, and analytics.
 
 ## Features
 
-- **User Management**: Create, read, update users with profiles and social links
-- **Track Management**: Upload, manage, and publish music tracks
-- **Social Features**: Like tracks, follow artists, comment on tracks
-- **Analytics**: Track plays, downloads, user statistics, and engagement metrics
-- **Search**: Full-text search for tracks and users
-- **RESTful API**: Clean, well-documented REST endpoints
+- **User Management** — Register, authenticate, and manage user profiles with avatar/header images
+- **Track Management** — Upload and publish music tracks with audio files and cover art
+- **Album Management** — Group tracks into albums with cover art
+- **File Storage** — File uploads (audio, images) are handled by the external [FileForge](https://fileforge1.pythonanywhere.com) service
+- **Social Features** — Like tracks, follow artists, comment on tracks, playlist management
+- **Analytics** — Play tracking, download counts, user statistics, and engagement metrics
+- **Search** — Full-text search across tracks and users
+- **JWT Authentication** — Secure token-based auth with refresh token rotation
 
 ## Technology Stack
 
-- **Django 5.0**: Web framework
-- **Django REST Framework 3.14**: REST API framework
-- **SQLite**: Database (easy to swap for PostgreSQL/MySQL)
-- **Python 3.10+**: Programming language
+| Layer | Technology |
+|---|---|
+| Language | Python 3.12 |
+| Framework | Django 5.0.1 |
+| API | Django REST Framework 3.14 |
+| Auth | `djangorestframework-simplejwt` |
+| Database | SQLite (dev) — PostgreSQL/MySQL ready |
+| File Storage | FileForge (external service) |
+| Background Tasks | `django-q2` (ORM-backed, no Redis needed) |
+| Cache | Django database cache |
+
+## Project Structure
+
+```
+musewave/
+├── config/                  # Django project config
+│   ├── settings.py          # Settings (env-driven)
+│   ├── urls.py              # Root URL routing
+│   └── wsgi.py
+├── musewave/                # Core app
+│   ├── models.py            # User, Track, Album, Playlist, Like, Follow, …
+│   ├── views.py             # API view functions
+│   ├── serializers.py       # DRF serializers (read + write)
+│   ├── auth_views.py        # Login, logout, token refresh
+│   ├── stream_views.py      # Audio stream redirect
+│   ├── middleware.py        # Request logging
+│   └── services/
+│       └── fileforge.py     # FileForge API client
+├── manage.py
+├── requirements.txt
+└── API_ENDPOINTS.md         # Full endpoint reference
+```
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.10 or higher
-- pip (Python package manager)
+- Python 3.12
+- pip
 
 ### Setup
 
 1. **Clone the repository**
    ```bash
+   git clone <repo-url>
    cd django-music-backend
    ```
 
-2. **Create a virtual environment (recommended)**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
+2. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-4. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your settings
-   ```
+3. **Configure environment variables** (see [Environment Variables](#environment-variables))
 
-5. **Run migrations**
+4. **Run migrations**
    ```bash
-   python manage.py makemigrations
    python manage.py migrate
+   python manage.py createcachetable
    ```
 
-6. **Create a superuser (optional, for admin panel)**
+5. **Create a superuser** (optional — for the admin panel)
    ```bash
    python manage.py createsuperuser
    ```
 
-7. **Run the development server**
+6. **Start the development server**
    ```bash
    python manage.py runserver 0.0.0.0:5000
    ```
 
-The API will be available at `http://localhost:5000/musewave/`
+The API is available at `http://localhost:5000/api/`.
+
+## Environment Variables
+
+Create a `.env` file in the project root or set these in your environment:
+
+| Variable | Description | Default |
+|---|---|---|
+| `SECRET_KEY` | Django secret key | Insecure dev key |
+| `DEBUG` | Enable debug mode | `True` |
+| `FILEFORGE_API_KEY` | API key from the FileForge developer console | `ffk_dummy_key_replace_me` |
+| `FILEFORGE_BASE_URL` | FileForge service base URL | `https://fileforge1.pythonanywhere.com` |
+| `EMAIL_HOST` | SMTP host for verification emails | — |
+| `EMAIL_PORT` | SMTP port | `587` |
+| `EMAIL_HOST_USER` | SMTP username | — |
+| `EMAIL_HOST_PASSWORD` | SMTP password | — |
+| `DEFAULT_FROM_EMAIL` | From address for outgoing emails | `EMAIL_HOST_USER` |
+
+## File Storage — FileForge
+
+All file uploads (audio, cover images, user avatars and headers) are routed through the **FileForge** service at `https://fileforge1.pythonanywhere.com`.
+
+### How it works
+
+1. The client sends a `multipart/form-data` request with the file field alongside the normal JSON fields.
+2. MuseWave uploads the file to FileForge in **sync mode** and receives a CDN URL immediately.
+3. The URL and the FileForge file ID are stored in the database.
+4. When a track or album is deleted, the associated files are automatically removed from FileForge.
+
+### File fields
+
+| Resource | File field | URL stored on model |
+|---|---|---|
+| User | `avatar_file` (image) | `avatar_url` |
+| User | `header_file` (image) | `header_url` |
+| Track | `audio_file` (any) | `audio_url` |
+| Track | `cover_file` (image) | `cover_url` |
+| Album | `cover_file` (image) | `cover_url` |
+
+Clients that already have a hosted URL can pass it directly (e.g. `"audio_url": "https://..."`) and skip the file upload.
+
+### FileForge client
+
+The client lives at `musewave/services/fileforge.py` and exposes:
+
+```python
+from musewave.services.fileforge import upload_file, delete_file, health
+
+# Upload a file (returns the FileForge record dict)
+record = upload_file(file_obj, "track_audio.mp3")
+url    = record["url"]
+fid    = record["id"]
+
+# Delete a file by its FileForge ID
+delete_file(fid)
+
+# Check service health
+health()  # {"status": "ok", "providers": ["cloudinary", "google_drive"]}
+```
 
 ## API Endpoints
 
+All endpoints are prefixed with `/api/`. See `API_ENDPOINTS.md` for the full reference.
+
+### Authentication
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/users/login` | Login — returns JWT access + refresh tokens |
+| `POST` | `/api/users/logout` | Logout (blacklists refresh token) |
+| `POST` | `/api/users/refresh` | Refresh access token |
+| `GET` | `/api/users/verify-token` | Verify an access token |
+| `POST` | `/api/users/password/change` | Change password |
+| `POST` | `/api/users/password/reset` | Request password reset email |
+| `POST` | `/api/users/password/reset/confirm` | Confirm password reset |
+
 ### Users
 
-- `GET /musewave/users/` - List all users (with pagination)
-- `GET /musewave/users/<id>/` - Get user by ID
-- `GET /musewave/users/username/<username>/` - Get user by username
-- `POST /musewave/users/create/` - Create a new user
-- `PATCH /musewave/users/<id>/update/` - Update user
-- `GET /musewave/users/<id>/stats/` - Get user statistics
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/users` | List users (auth required) |
+| `POST` | `/api/users/create` | Register a new user |
+| `GET` | `/api/users/<id>` | Public profile |
+| `GET` | `/api/users/<id>/me` | Own full profile (auth required) |
+| `PATCH` | `/api/users/<id>/update` | Update profile / upload avatar or header |
+| `GET` | `/api/users/username/<username>` | Look up by username |
+| `GET` | `/api/users/<id>/stats` | User statistics |
+| `GET` | `/api/users/<id>/likes` | Liked tracks |
+| `GET` | `/api/users/<id>/plays` | Play history |
+| `GET` | `/api/users/<id>/albums` | User albums |
+| `POST` | `/api/users/<id>/follow` | Follow a user |
+| `DELETE` | `/api/users/<id>/follow` | Unfollow a user |
+| `GET` | `/api/users/<id>/followers` | List followers |
+| `GET` | `/api/users/<id>/following` | List following |
 
 ### Tracks
 
-- `GET /musewave/tracks/` - List tracks (with filters: userId, genre, mood, tags, published)
-- `GET /musewave/tracks/<id>/` - Get track by ID
-- `POST /musewave/tracks/create/` - Create a new track
-- `PATCH /musewave/tracks/<id>/update/` - Update track
-- `DELETE /musewave/tracks/<id>/delete/` - Delete track
-- `GET /musewave/tracks/<id>/stats/` - Get track statistics
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tracks` | List tracks (filters: `userId`, `genre`, `mood`, `tags`, `published`, `sortBy`, `sortOrder`) |
+| `POST` | `/api/tracks/create` | Create a track (multipart — include `audio_file` and optionally `cover_file`) |
+| `GET` | `/api/tracks/<id>` | Get track |
+| `PATCH` | `/api/tracks/<id>` | Update track |
+| `DELETE` | `/api/tracks/<id>` | Delete track (removes files from FileForge) |
+| `GET` | `/api/tracks/<id>/stream/` | Returns `audio_url` for client-side streaming |
+| `GET` | `/api/tracks/<id>/stream-url/` | Returns stream metadata + URL |
+| `GET` | `/api/tracks/<id>/download/` | Record a download and return audio URL |
+| `GET` | `/api/tracks/<id>/stats` | Track statistics |
+| `POST` | `/api/tracks/<id>/like` | Like a track |
+| `DELETE` | `/api/tracks/<id>/like` | Unlike a track |
+| `POST` | `/api/tracks/<id>/play` | Record a play event |
+| `POST` | `/api/tracks/<id>/download` | Record a download |
 
 ### Albums
 
-- `GET /musewave/users/<user_id>/albums` - Get all albums for a user
-- `GET /musewave/albums/<id>` - Get album by ID (includes tracks)
-- `POST /musewave/albums` - Create a new album (with track associations)
-- `PATCH /musewave/albums/<id>/update` - Update album
-- `DELETE /musewave/albums/<id>/delete` - Delete album (tracks remain, album association removed)
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/albums` | Create an album (multipart — include `cover_file` optionally) |
+| `GET` | `/api/albums/<id>` | Get album |
+| `PATCH` | `/api/albums/<id>/update` | Update album |
+| `DELETE` | `/api/albums/<id>/delete` | Delete album (tracks remain, association removed) |
 
-### Likes
+### Playlists
 
-- `POST /musewave/tracks/<track_id>/like/` - Like a track
-- `DELETE /musewave/tracks/<track_id>/like/delete/` - Unlike a track
-- `GET /musewave/tracks/<track_id>/like/<user_id>/` - Check if user liked track
-- `GET /musewave/users/<user_id>/likes/` - Get user's liked tracks
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/playlists` | List playlists (auth required) |
+| `POST` | `/api/playlists` | Create a playlist |
+| `GET` | `/api/playlists/<id>` | Get playlist with tracks |
+| `PATCH` | `/api/playlists/<id>` | Update playlist |
+| `DELETE` | `/api/playlists/<id>` | Delete playlist |
+| `POST` | `/api/playlists/<id>/add-track` | Add a track |
+| `POST` | `/api/playlists/<id>/remove-track` | Remove a track |
+| `POST` | `/api/playlists/<id>/reorder` | Reorder tracks |
 
-### Downloads
+### Search & Artists
 
-- `POST /musewave/tracks/<track_id>/download/` - Record a download
-- `GET /musewave/tracks/<track_id>/downloads/` - Get track downloads
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/search?q=<query>&type=tracks\|users\|all` | Search tracks and/or users |
+| `GET` | `/api/artists` | List artists (users with published tracks) |
 
-### Plays
+## Request / Response Examples
 
-- `POST /musewave/tracks/<track_id>/play/` - Record a play
-- `GET /musewave/tracks/<track_id>/plays/` - Get track plays
-- `GET /musewave/users/<user_id>/plays/` - Get user's play history
+### Register a User
 
-### Follows
-
-- `POST /musewave/users/<user_id>/follow/` - Follow a user
-- `DELETE /musewave/users/<user_id>/follow/delete/` - Unfollow a user
-- `GET /musewave/users/<user_id>/follow/<follower_id>/` - Check if following
-- `GET /musewave/users/<user_id>/followers/` - Get user's followers
-- `GET /musewave/users/<user_id>/following/` - Get users being followed
-
-### Search
-
-- `GET /musewave/search/?q=<query>&type=<tracks|users|all>&limit=<number>` - Search
-- `POST /musewave/search/rebuild/` - Rebuild search index (no-op in Django)
-
-### Artists
-
-- `GET /musewave/artists/` - Get all users who have published tracks
-
-## Request/Response Examples
-
-### Create a User
-
-**Request:**
 ```bash
-POST /musewave/users/create/
+POST /api/users/create
 Content-Type: application/json
 
 {
@@ -148,252 +245,148 @@ Content-Type: application/json
 }
 ```
 
-**Response:**
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "username": "john_doe",
   "email": "john@example.com",
   "display_name": "John Doe",
-  "bio": "Music producer and DJ",
   "verified": false,
-  "created_at": "2024-02-04T10:30:00Z",
-  "updated_at": "2024-02-04T10:30:00Z"
+  "message": "Account created successfully! Please check your email to verify your account.",
+  "verification_required": true
 }
 ```
 
-### Create a Track
+### Create a Track (with file upload)
 
-**Request:**
 ```bash
-POST /musewave/tracks/create/
-Content-Type: application/json
+POST /api/tracks/create
+Content-Type: multipart/form-data
 
+user_id=<uuid>
+title=Summer Vibes
+artist=John Doe
+artist_slug=john-doe
+genre=Electronic
+audio_duration=240.5
+published=true
+audio_file=@summer-vibes.mp3     # uploaded to FileForge
+cover_file=@cover.jpg            # uploaded to FileForge
+```
+
+```json
 {
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "id": "track-uuid",
   "title": "Summer Vibes",
   "artist": "John Doe",
-  "artist_slug": "john-doe",
-  "genre": "Electronic",
-  "mood": "Happy",
-  "tags": ["summer", "dance", "upbeat"],
-  "audio_url": "https://example.com/tracks/summer-vibes.mp3",
-  "audio_file_size": 5242880,
+  "audio_url": "https://res.cloudinary.com/.../summer-vibes.mp3",
+  "cover_url": "https://res.cloudinary.com/.../cover.jpg",
   "audio_duration": 240.5,
-  "audio_format": "mp3",
   "published": true
 }
 ```
 
-### Create an Album
+Or pass URLs directly without uploading a file:
 
-**Request:**
-```bash
-POST /musewave/albums
-Content-Type: application/json
-
-{
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
-  "title": "Summer Collection",
-  "artist": "John Doe",
-  "genre": "Electronic",
-  "description": "A collection of summer hits",
-  "release_date": "2024-06-01T00:00:00Z",
-  "published": true,
-  "track_ids": [
-    "track-uuid-1",
-    "track-uuid-2",
-    "track-uuid-3"
-  ]
-}
-```
-
-**Response:**
 ```json
 {
-  "id": "album-uuid",
-  "user_id": "550e8400-e29b-41d4-a716-446655440000",
-  "title": "Summer Collection",
+  "user_id": "...",
+  "title": "Summer Vibes",
   "artist": "John Doe",
+  "artist_slug": "john-doe",
   "genre": "Electronic",
-  "description": "A collection of summer hits",
-  "release_date": "2024-06-01T00:00:00Z",
-  "published": true,
-  "track_count": 3,
-  "created_at": "2024-02-04T10:30:00Z",
-  "updated_at": "2024-02-04T10:30:00Z"
+  "audio_url": "https://cdn.example.com/tracks/summer-vibes.mp3",
+  "audio_duration": 240.5,
+  "published": true
 }
 ```
 
-### List Tracks with Filters
+### Update User Avatar
 
-**Request:**
 ```bash
-GET /musewave/tracks/?genre=Electronic&published=true&sortBy=plays&sortOrder=desc&limit=10
-```
+PATCH /api/users/<id>/update
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
 
-### Search
-
-**Request:**
-```bash
-GET /musewave/search/?q=summer&type=all&limit=20
-```
-
-**Response:**
-```json
-{
-  "tracks": [...],
-  "users": [...]
-}
+avatar_file=@new-avatar.jpg
 ```
 
 ## Database Models
 
 ### User
-- Basic info: username, email, password (hashed)
-- Profile: display_name, bio, avatar_url, header_url
-- Social links: twitter, instagram, spotify, soundcloud
-- Metadata: verified, created_at, updated_at
-
-### Album
-- Info: title, artist, description, genre
-- Media: cover_url, cover_gradient
-- Metadata: release_date, published
-- Relationships: user (owner), tracks (one-to-many)
+- `username`, `email`, `display_name`, `bio`
+- `avatar_url`, `avatar_fileforge_id`
+- `header_url`, `header_fileforge_id`
+- Social links: `twitter`, `instagram`, `spotify`, `soundcloud`
+- `verified`, `is_active`, `is_staff`
 
 ### Track
-- Info: title, artist, description, genre, mood, tags
-- Audio: audio_url, file_size, duration, format
-- Relationships: user (owner), album (optional)
-- Media: cover_url, waveform_data
-- Metadata: bpm, key
-- Stats: plays, likes, downloads, shares
-- Status: published, published_at
+- `title`, `artist`, `artist_slug`, `description`, `genre`, `mood`, `tags`
+- `audio_url`, `audio_fileforge_id`, `audio_file_size`, `audio_duration`, `audio_format`
+- `cover_url`, `cover_fileforge_id`, `cover_gradient`, `waveform_data`
+- `bpm`, `key`
+- Stats: `plays`, `likes`, `downloads`, `shares`
+- `published`, `published_at`
 
-### Like
-- References: user, track
-- Timestamp: created_at
+### Album
+- `title`, `artist`, `description`, `genre`
+- `cover_url`, `cover_fileforge_id`, `cover_gradient`
+- `release_date`, `published`
 
-### Download
-- References: user (optional), track
-- Metadata: ip_address, user_agent
-- Timestamp: created_at
-
-### Play
-- References: user (optional), track
-- Data: duration, completed
-- Metadata: ip_address, user_agent
-- Timestamp: created_at
-
-### Follow
-- References: follower, following
-- Timestamp: created_at
-
-## Statistics & Analytics
-
-The API provides comprehensive statistics:
-
-### User Stats
-- Total tracks uploaded
-- Total plays across all tracks
-- Total likes received
-- Total downloads
-- Follower/following counts
-- Monthly unique listeners
-
-### Track Stats
-- Daily play counts
-- Unique listener count
-- Average listen duration
-- Completion rate (% who listened to >80%)
+### Supporting models
+- **Like** — user × track
+- **Play** — user × track + duration, completed flag
+- **Download** — user × track + ip/user-agent
+- **Follow** — follower × following
+- **Playlist / PlaylistTrack** — user playlists with ordered tracks
+- **Comment** — user × track + timestamp
 
 ## Development
 
-### Running Tests
+### Run the server
 ```bash
-python manage.py test
+python manage.py runserver 0.0.0.0:5000
 ```
 
-### Creating Migrations
+### Create migrations after model changes
 ```bash
 python manage.py makemigrations
 python manage.py migrate
 ```
 
-### Accessing Admin Panel
-Navigate to `http://localhost:5000/admin/` and log in with your superuser credentials.
+### Admin panel
+Navigate to `http://localhost:5000/admin/` and log in with superuser credentials.
+
+### Check FileForge connectivity
+```bash
+python -c "
+import django, os
+os.environ['DJANGO_SETTINGS_MODULE'] = 'config.settings'
+django.setup()
+from musewave.services.fileforge import health
+print(health())
+"
+```
 
 ## Production Deployment
 
-1. **Set DEBUG=False in settings**
-2. **Configure a production database** (PostgreSQL recommended)
-3. **Set a strong SECRET_KEY**
-4. **Configure ALLOWED_HOSTS**
-5. **Collect static files:**
-   ```bash
-   python manage.py collectstatic
-   ```
-6. **Use a production server** (Gunicorn, uWSGI)
-7. **Set up a reverse proxy** (Nginx, Apache)
-8. **Enable HTTPS**
-
-### Example with Gunicorn
+The project is pre-configured for Replit autoscale deployment using Gunicorn:
 
 ```bash
-pip install gunicorn
-gunicorn config.wsgi:application --bind 0.0.0.0:5000
+gunicorn --bind=0.0.0.0:5000 --reuse-port --workers=2 config.wsgi:application
 ```
 
-## API Compatibility
+For other environments:
 
-This Django backend is designed to be a drop-in replacement for the Express/TypeScript backend, maintaining the same API endpoints and response formats.
-
-### Key Differences from Express Backend
-
-1. **Database**: Uses Django ORM with SQLite (vs JSON files)
-2. **Better Performance**: Database queries are optimized with indexes
-3. **Admin Interface**: Built-in Django admin for data management
-4. **Type Safety**: Python type hints (vs TypeScript)
-5. **Scalability**: Easier to scale with proper database
-
-### Migration Notes
-
-- All endpoint paths are identical
-- Response formats match the original API
-- Query parameters work the same way
-- Request body structures are unchanged
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port already in use**
-   ```bash
-   # Use a different port
-   python manage.py runserver 0.0.0.0:8000
-   ```
-
-2. **Database migrations error**
-   ```bash
-   # Reset migrations
-   python manage.py migrate --run-syncdb
-   ```
-
-3. **CORS errors**
-   - Ensure `django-cors-headers` is installed and configured
-   - Check CORS_ALLOW_ALL_ORIGINS in settings
+1. Set `DEBUG=False`
+2. Set a strong `SECRET_KEY`
+3. Configure `ALLOWED_HOSTS`
+4. Set `FILEFORGE_API_KEY` to a real key from the FileForge developer console
+5. Configure SMTP variables for email verification
+6. Use PostgreSQL for production (`DATABASES` in `settings.py`)
+7. Run `python manage.py collectstatic`
+8. Serve static files via Nginx or a CDN
 
 ## License
 
 MIT License
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Support
-
-For issues and questions, please open an issue on the repository.
