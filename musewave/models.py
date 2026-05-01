@@ -35,25 +35,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     display_name = models.CharField(max_length=100, blank=True, null=True)
     bio          = models.TextField(max_length=500, blank=True, null=True)
 
-    # ── Profile images stored in Google Drive via fileforge ──────────────────
-    avatar_file = models.OneToOneField(
-        'fileforge.DriveFile',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='user_avatar',
-    )
-    header_file = models.OneToOneField(
-        'fileforge.DriveFile',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='user_header',
-    )
+    avatar_url = models.URLField(blank=True, null=True)
+    header_url = models.URLField(blank=True, null=True)
 
-    location  = models.CharField(max_length=100, blank=True, null=True)
-    website   = models.URLField(blank=True, null=True)
-    twitter   = models.CharField(max_length=100, blank=True, null=True)
-    instagram = models.CharField(max_length=100, blank=True, null=True)
-    spotify   = models.CharField(max_length=100, blank=True, null=True)
+    location   = models.CharField(max_length=100, blank=True, null=True)
+    website    = models.URLField(blank=True, null=True)
+    twitter    = models.CharField(max_length=100, blank=True, null=True)
+    instagram  = models.CharField(max_length=100, blank=True, null=True)
+    spotify    = models.CharField(max_length=100, blank=True, null=True)
     soundcloud = models.CharField(max_length=100, blank=True, null=True)
 
     verified   = models.BooleanField(default=False)
@@ -77,13 +66,7 @@ class Album(models.Model):
     artist      = models.CharField(max_length=200)
     description = models.TextField(max_length=2000, blank=True, null=True)
 
-    # ── Cover image stored in Google Drive via fileforge ─────────────────────
-    cover_file = models.OneToOneField(
-        'fileforge.DriveFile',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='album_cover',
-    )
+    cover_url = models.URLField(blank=True, null=True)
 
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
     release_date   = models.DateTimeField()
@@ -112,27 +95,15 @@ class Track(models.Model):
     mood        = models.CharField(max_length=50, blank=True, null=True)
     tags        = models.JSONField(default=list, blank=True)
 
-    # ── Audio file stored in Google Drive via fileforge ───────────────────────
-    audio_file = models.OneToOneField(
-        'fileforge.DriveFile',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='track',
-    )
+    audio_url       = models.URLField(blank=True, null=True)
     audio_file_size = models.BigIntegerField(null=True, blank=True)
-    audio_duration  = models.FloatField()          # required — must be supplied by client
+    audio_duration  = models.FloatField()
     audio_format    = models.CharField(max_length=20, blank=True, null=True)
 
-    # ── Cover image stored in Google Drive via fileforge ──────────────────────
-    cover_file = models.OneToOneField(
-        'fileforge.DriveFile',
-        on_delete=models.SET_NULL,
-        null=True, blank=True,
-        related_name='track_cover',
-    )
+    cover_url = models.URLField(blank=True, null=True)
 
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
-    waveform_data  = models.TextField(blank=True, null=True)  # JSON string
+    waveform_data  = models.TextField(blank=True, null=True)
 
     bpm = models.IntegerField(blank=True, null=True, validators=[MinValueValidator(1)])
     key = models.CharField(max_length=10, blank=True, null=True)

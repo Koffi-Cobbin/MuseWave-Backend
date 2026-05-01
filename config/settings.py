@@ -80,7 +80,6 @@ INSTALLED_APPS = [
     'corsheaders',
     'django_q',
     'musewave',
-    'fileforge',
 ]
 
 MIDDLEWARE = [
@@ -304,11 +303,6 @@ LOGGING = {
 }
 
 APPEND_SLASH = False
-
-GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
-GOOGLE_DRIVE_ROOT_FOLDER_ID = os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID")
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:

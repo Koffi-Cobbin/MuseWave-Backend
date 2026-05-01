@@ -3,7 +3,6 @@ import logging
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q, Sum, Avg, Max
-from django.http import StreamingHttpResponse
 from django.core.cache import cache
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -25,18 +24,6 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
-# ─── Shared Drive cleanup helper ──────────────────────────────────────────────
-
-def _delete_drive_file(drive_file):
-    """Silently delete a DriveFile from Google Drive and the DB."""
-    if not drive_file:
-        return
-    from fileforge.services.google_drive import delete_file as drive_delete
-    try:
-        drive_delete(drive_file.file_id)
-        drive_file.delete()
-    except Exception as exc:
-        logger.warning("Could not delete DriveFile %s: %s", drive_file.id, exc)
 
 
 # ============================================================================
@@ -257,8 +244,6 @@ def track_detail(request, track_id):
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
-        _delete_drive_file(track.audio_file)
-        _delete_drive_file(track.cover_file)
         track.delete()
         return Response({'success': True})
 
@@ -267,8 +252,6 @@ def track_detail(request, track_id):
 def delete_track_method(request, track_id):
     """Separate DELETE endpoint (kept for URL compatibility)."""
     track = get_object_or_404(Track, id=track_id)
-    _delete_drive_file(track.audio_file)
-    _delete_drive_file(track.cover_file)
     track.delete()
     return Response({'success': True})
 
@@ -516,7 +499,6 @@ def update_album(request, album_id):
 @api_view(['DELETE'])
 def delete_album(request, album_id):
     album = get_object_or_404(Album, id=album_id)
-    _delete_drive_file(album.cover_file)
     Track.objects.filter(album=album).update(album=None)
     album.delete()
     return Response({'success': True})
@@ -576,18 +558,9 @@ def stream_track(request, track_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def download_track(request, track_id):
-    from fileforge.services.google_drive import stream_file_chunks
-
     track = get_object_or_404(Track, id=track_id)
-    if not track.audio_file:
+    if not track.audio_url:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    drive_file = track.audio_file
-    file_id    = drive_file.file_id
-    total_size = drive_file.size or 0
-    mime_type  = drive_file.file_type or 'application/octet-stream'
-    ext        = mime_type.split('/')[-1] if '/' in mime_type else 'mp3'
-    filename   = f"{track.artist} - {track.title}.{ext}"
 
     Download.objects.create(
         user=request.user, track=track,
@@ -597,33 +570,22 @@ def download_track(request, track_id):
     track.downloads += 1
     track.save(update_fields=['downloads'])
 
-    response = StreamingHttpResponse(
-        (chunk for chunk in stream_file_chunks(file_id, start=0, end=total_size - 1)),
-        content_type=mime_type,
-    )
-    response['Content-Length']      = total_size
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    return response
+    return Response({'audio_url': track.audio_url})
 
 
 @api_view(['GET'])
 def get_track_stream_url(request, track_id):
     track = get_object_or_404(Track, id=track_id)
-    if not track.audio_file:
+    if not track.audio_url:
         return Response({'error': 'Audio file not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    drive_file = track.audio_file
-    stream_url = request.build_absolute_uri(f'/api/tracks/{track_id}/stream/')
-    mime_type  = drive_file.file_type or ''
-    fmt        = mime_type.split('/')[-1] if '/' in mime_type else (track.audio_format or 'mp3')
 
     return Response({
         'id':         str(track.id),
         'title':      track.title,
         'artist':     track.artist,
-        'stream_url': stream_url,
+        'stream_url': track.audio_url,
         'duration':   track.audio_duration,
-        'format':     fmt,
+        'format':     track.audio_format or 'mp3',
     })
 
 
