@@ -35,8 +35,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     display_name = models.CharField(max_length=100, blank=True, null=True)
     bio          = models.TextField(max_length=500, blank=True, null=True)
 
-    avatar_url = models.URLField(blank=True, null=True)
-    header_url = models.URLField(blank=True, null=True)
+    avatar_url          = models.URLField(blank=True, null=True)
+    avatar_fileforge_id = models.IntegerField(blank=True, null=True)
+    header_url          = models.URLField(blank=True, null=True)
+    header_fileforge_id = models.IntegerField(blank=True, null=True)
 
     location   = models.CharField(max_length=100, blank=True, null=True)
     website    = models.URLField(blank=True, null=True)
@@ -66,7 +68,8 @@ class Album(models.Model):
     artist      = models.CharField(max_length=200)
     description = models.TextField(max_length=2000, blank=True, null=True)
 
-    cover_url = models.URLField(blank=True, null=True)
+    cover_url          = models.URLField(blank=True, null=True)
+    cover_fileforge_id = models.IntegerField(blank=True, null=True)
 
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
     release_date   = models.DateTimeField()
@@ -95,12 +98,14 @@ class Track(models.Model):
     mood        = models.CharField(max_length=50, blank=True, null=True)
     tags        = models.JSONField(default=list, blank=True)
 
-    audio_url       = models.URLField(blank=True, null=True)
-    audio_file_size = models.BigIntegerField(null=True, blank=True)
-    audio_duration  = models.FloatField()
-    audio_format    = models.CharField(max_length=20, blank=True, null=True)
+    audio_url          = models.URLField(blank=True, null=True)
+    audio_fileforge_id = models.IntegerField(blank=True, null=True)
+    audio_file_size    = models.BigIntegerField(null=True, blank=True)
+    audio_duration     = models.FloatField()
+    audio_format       = models.CharField(max_length=20, blank=True, null=True)
 
-    cover_url = models.URLField(blank=True, null=True)
+    cover_url          = models.URLField(blank=True, null=True)
+    cover_fileforge_id = models.IntegerField(blank=True, null=True)
 
     cover_gradient = models.CharField(max_length=255, blank=True, null=True)
     waveform_data  = models.TextField(blank=True, null=True)

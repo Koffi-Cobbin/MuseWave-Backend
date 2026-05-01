@@ -1,0 +1,227 @@
+
+BASE_URL = "https://fileforge1.pythonanywhere.com"
+const STORAGE_ENDPOINTS: Endpoint[] = [
+  {
+    method: "GET",
+    path: "/api/health/",
+    description: "Liveness probe — no authentication required.",
+    response: `{
+  "status": "ok",
+  "providers": ["cloudinary", "google_drive"]
+}`,
+  },
+  {
+    method: "GET",
+    path: "/api/providers/",
+    description: "List registered providers and their capabilities.",
+    response: `{
+  "providers": [
+    { "name": "cloudinary",   "supports_direct_upload": true },
+    { "name": "google_drive", "supports_direct_upload": true }
+  ]
+}`,
+  },
+  {
+    method: "GET",
+    path: "/api/credentials/",
+    description: "List provider credentials for the calling App.",
+    response: `[
+  {
+    "id": 1,
+    "owner": "app_xk3m9pq7rz1c",
+    "provider": "cloudinary",
+    "credentials": { "cloud_name": "my-cloud", "api_key": "123" },
+    "is_default": true,
+    "created_at": "2026-04-27T09:00:00Z",
+    "updated_at": "2026-04-27T09:00:00Z"
+  }
+]`,
+  },
+  {
+    method: "POST",
+    path: "/api/credentials/",
+    description: "Create or update (upsert) credentials for a provider.",
+    request: `{
+  "provider": "cloudinary",
+  "credentials": {
+    "cloud_name": "my-cloud",
+    "api_key": "123456789",
+    "api_secret": "secret"
+  },
+  "is_default": true
+}`,
+    response: `// 201 Created
+{
+  "id": 1,
+  "owner": "app_xk3m9pq7rz1c",
+  "provider": "cloudinary",
+  "credentials": { ... },
+  "is_default": true,
+  "created_at": "2026-04-27T09:00:00Z",
+  "updated_at": "2026-04-27T09:00:00Z"
+}`,
+  },
+  {
+    method: "GET",
+    path: "/api/credentials/{id}/",
+    description: "Get a single credential. Returns 404 if owned by a different App.",
+  },
+  {
+    method: "PATCH",
+    path: "/api/credentials/{id}/",
+    description: "Partially update a credential (PATCH) or fully replace it (PUT).",
+  },
+  {
+    method: "DELETE",
+    path: "/api/credentials/{id}/",
+    description: "Delete a credential record.",
+    response: `// 204 No Content`,
+  },
+  {
+    method: "GET",
+    path: "/api/files/",
+    description: "List files for the calling App. Filter with ?provider=cloudinary.",
+    response: `[
+  {
+    "id": 42,
+    "name": "photo.jpg",
+    "size": 204800,
+    "content_type": "image/jpeg",
+    "provider": "cloudinary",
+    "provider_file_id": "photo",
+    "url": "https://res.cloudinary.com/my-cloud/image/upload/photo.jpg",
+    "status": "completed",
+    "error_message": "",
+    "owner": "app_xk3m9pq7rz1c",
+    "metadata": { "resource_type": "image", "bytes": 204800 },
+    "upload_strategy": "async",
+    "created_at": "2026-04-27T12:00:00Z",
+    "updated_at": "2026-04-27T12:00:05Z"
+  }
+]`,
+  },
+  {
+    method: "POST",
+    path: "/api/files/",
+    description: "Upload a file (≤ 5 MB default). Mode 'async' (default) returns 202 and queues upload; mode 'sync' blocks and returns 200 when done.",
+    request: `# multipart/form-data
+curl -X POST http://localhost:5000/api/files/ \\
+  -H "Authorization: Bearer ffk_YOUR_KEY" \\
+  -F "file=@document.pdf" \\
+  -F "provider=cloudinary" \\
+  -F "name=document.pdf" \\
+  -F "mode=async"`,
+    response: `// 202 Accepted (mode: "async", default)
+{
+  "id": 44,
+  "name": "document.pdf",
+  "size": 1048576,
+  "content_type": "application/pdf",
+  "provider": "cloudinary",
+  "provider_file_id": null,
+  "url": null,
+  "status": "pending",
+  "error_message": "",
+  "owner": "app_xk3m9pq7rz1c",
+  "metadata": {},
+  "upload_strategy": "async",
+  "created_at": "2026-04-27T10:00:00Z",
+  "updated_at": "2026-04-27T10:00:00Z"
+}
+
+// 200 OK (mode: "sync", upload succeeded)
+{
+  "id": 43,
+  "name": "report.pdf",
+  "status": "completed",
+  "provider_file_id": "report",
+  "url": "https://res.cloudinary.com/my-cloud/raw/upload/report.pdf",
+  "upload_strategy": "sync",
+  ...
+}
+
+// 502 Bad Gateway (mode: "sync", provider upload failed)
+{ "detail": "Cloudinary credentials invalid.", "file": { "id": 43, "status": "failed", ... } }`,
+    note: `Fields: file (required), provider (required), name (optional), mode ("async" | "sync", default "async").
+Async: poll GET /api/files/{id}/ until status is "completed" or "failed". On failure, read error_message.
+Sync: blocks until the provider upload finishes — no polling needed. Returns 502 if the provider rejects the upload.`,
+  },
+  {
+    method: "GET",
+    path: "/api/files/{id}/",
+    description: "Get a file record. Returns 404 if owned by a different App.",
+    response: `// Status lifecycle:  pending → uploading → completed
+//                                          ↘ failed
+
+{
+  "id": 44,
+  "status": "completed",
+  "provider_file_id": "document",
+  "url": "https://res.cloudinary.com/my-cloud/raw/upload/document.pdf",
+  ...
+}`,
+  },
+  {
+    method: "PATCH",
+    path: "/api/files/{id}/",
+    description: "Rename a file. Updates the name on the provider as well.",
+    request: `{ "name": "new-name.pdf" }`,
+  },
+  {
+    method: "DELETE",
+    path: "/api/files/{id}/",
+    description: "Delete the file record and the underlying object from the provider.",
+    response: `// 204 No Content`,
+  },
+  {
+    method: "POST",
+    path: "/api/files/direct-upload/",
+    description: "Initiate a direct upload for large files. Returns a pre-signed URL.",
+    request: `{
+  "name": "large-video.mp4",
+  "provider": "cloudinary",
+  "size": 52428800,
+  "content_type": "video/mp4"
+}`,
+    response: `// 201 Created
+{
+  "file_id": 44,
+  "upload_url": "https://api.cloudinary.com/v1_1/my-cloud/video/upload",
+  "method": "POST",
+  "fields": {
+    "timestamp": "1745744400",
+    "public_id": "large-video",
+    "api_key": "123456789",
+    "signature": "abc123..."
+  },
+  "headers": {},
+  "expires_in": null,
+  "provider_ref": { "public_id": "large-video", "resource_type": "video" }
+}`,
+    note: "After receiving the ticket, upload directly to upload_url using the returned method and fields. Then call /direct-upload/complete/ to finalize.",
+  },
+  {
+    method: "POST",
+    path: "/api/files/direct-upload/complete/",
+    description: "Finalize a direct upload after the client has finished uploading.",
+    request: `{
+  "file_id": 44,
+  "provider_file_id": "large-video",
+  "provider_response": {
+    "public_id": "large-video",
+    "secure_url": "https://res.cloudinary.com/...",
+    "resource_type": "video",
+    "bytes": 52428800
+  }
+}`,
+    response: `// 200 OK
+{
+  "id": 44,
+  "status": "completed",
+  "provider_file_id": "large-video",
+  "url": "https://res.cloudinary.com/my-cloud/video/upload/large-video.mp4",
+  "upload_strategy": "direct",
+  ...
+}`,
+  },
+];

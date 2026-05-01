@@ -2,6 +2,12 @@
 
 A Django REST API for a music streaming platform. Provides RESTful endpoints for managing users, tracks, albums, playlists, likes, follows, and more.
 
+## File Storage
+
+File uploads (audio, cover images, avatars, headers) are handled by the external **FileForge** service at `https://fileforge1.pythonanywhere.com`. Files are uploaded via FileForge's REST API and the returned CDN URL is stored in the database. FileForge IDs are also stored per resource so files can be deleted from the provider when records are removed.
+
+The client lives at `musewave/services/fileforge.py`.
+
 ## Tech Stack
 
 - **Language:** Python 3.12
@@ -38,8 +44,8 @@ python manage.py runserver 0.0.0.0:5000
 
 ## Environment Variables
 
-Optional variables (app works in dev without them):
-
+- `FILEFORGE_API_KEY` — API key from the FileForge developer console (currently uses dummy default `ffk_dummy_key_replace_me`)
+- `FILEFORGE_BASE_URL` — Override the FileForge service base URL (default: `https://fileforge1.pythonanywhere.com`)
 - `SECRET_KEY` — Django secret key
 - `DEBUG` — Set to `True` for development
 - `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` — SMTP email settings

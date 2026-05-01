@@ -13,6 +13,42 @@ from .models import User, Track, Like, Download, Play, Follow, Playlist, Playlis
 logger = logging.getLogger(__name__)
 
 
+# ─── FileForge upload helper ───────────────────────────────────────────────────
+
+def _upload(file_obj, filename):
+    """
+    Upload *file_obj* to FileForge (sync mode).
+    Returns (url, fileforge_id) on success, or raises serializers.ValidationError.
+    """
+    from musewave.services.fileforge import upload_file, FileForgeError
+
+    try:
+        record = upload_file(file_obj, filename)
+    except FileForgeError as exc:
+        raise serializers.ValidationError(f"File upload failed: {exc}")
+
+    url = record.get("url") or ""
+    fid = record.get("id")
+
+    if not url:
+        raise serializers.ValidationError(
+            f"FileForge upload succeeded but returned no URL (status={record.get('status')!r})"
+        )
+
+    return url, fid
+
+
+def _delete_from_fileforge(fileforge_id):
+    """Silently attempt to delete a file from FileForge."""
+    if not fileforge_id:
+        return
+    from musewave.services.fileforge import delete_file
+    try:
+        delete_file(fileforge_id)
+    except Exception as exc:
+        logger.warning("Could not delete FileForge file %s: %s", fileforge_id, exc)
+
+
 # ─── User serializers ─────────────────────────────────────────────────────────
 
 class UserSerializer(serializers.ModelSerializer):
@@ -58,18 +94,42 @@ class PublicUserSerializer(serializers.ModelSerializer):
 
 
 class UpdateUserSerializer(serializers.ModelSerializer):
+    avatar_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    header_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model  = User
         fields = [
             'display_name', 'bio', 'location', 'website',
             'twitter', 'instagram', 'spotify', 'soundcloud',
             'avatar_url', 'header_url',
+            'avatar_file', 'header_file',
         ]
 
     def update(self, instance, validated_data):
+        avatar_file = validated_data.pop('avatar_file', None)
+        header_file = validated_data.pop('header_file', None)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if avatar_file:
+            old_fid = instance.avatar_fileforge_id
+            url, fid = _upload(avatar_file, f"user_{instance.id}_avatar")
+            _delete_from_fileforge(old_fid)
+            instance.avatar_url = url
+            instance.avatar_fileforge_id = fid
+            instance.save(update_fields=['avatar_url', 'avatar_fileforge_id'])
+
+        if header_file:
+            old_fid = instance.header_fileforge_id
+            url, fid = _upload(header_file, f"user_{instance.id}_header")
+            _delete_from_fileforge(old_fid)
+            instance.header_url = url
+            instance.header_fileforge_id = fid
+            instance.save(update_fields=['header_url', 'header_fileforge_id'])
+
         return instance
 
 
@@ -78,18 +138,20 @@ class CreateUserSerializer(serializers.ModelSerializer):
     instagram  = serializers.CharField(required=False, allow_blank=True)
     spotify    = serializers.CharField(required=False, allow_blank=True)
     soundcloud = serializers.CharField(required=False, allow_blank=True)
+    avatar_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
 
     class Meta:
         model  = User
         fields = [
             'username', 'email', 'password', 'display_name', 'bio',
             'location', 'website', 'twitter', 'instagram', 'spotify', 'soundcloud',
-            'avatar_url',
+            'avatar_url', 'avatar_file',
         ]
         extra_kwargs = {
-            'password': {'write_only': True},
-            'username': {'min_length': 3, 'max_length': 30},
-            'bio':      {'max_length': 500},
+            'password':   {'write_only': True},
+            'username':   {'min_length': 3, 'max_length': 30},
+            'bio':        {'max_length': 500},
+            'avatar_url': {'required': False},
         }
 
     def validate_username(self, value):
@@ -103,13 +165,23 @@ class CreateUserSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        password = validated_data.pop('password')
+        password    = validated_data.pop('password')
+        avatar_file = validated_data.pop('avatar_file', None)
 
         user = User(**validated_data)
         user.set_password(password)
         user.is_active = True
         user.verified  = False
         user.save()
+
+        if avatar_file:
+            try:
+                url, fid = _upload(avatar_file, f"user_{user.id}_avatar")
+                user.avatar_url = url
+                user.avatar_fileforge_id = fid
+                user.save(update_fields=['avatar_url', 'avatar_fileforge_id'])
+            except Exception as exc:
+                logger.warning("Avatar upload failed during signup for %s: %s", user.email, exc)
 
         user._plain_password = password
         self.send_verification_email(user)
@@ -166,18 +238,21 @@ class AlbumSerializer(serializers.ModelSerializer):
 
 
 class CreateAlbumSerializer(serializers.ModelSerializer):
-    user_id   = serializers.UUIDField(write_only=True)
-    track_ids = serializers.JSONField(write_only=True, required=False)
+    user_id    = serializers.UUIDField(write_only=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    track_ids  = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model  = Album
         fields = [
             'user_id', 'title', 'artist', 'description',
-            'cover_url', 'cover_gradient', 'release_date', 'genre',
+            'cover_url', 'cover_file', 'cover_gradient', 'release_date', 'genre',
             'published', 'track_ids',
         ]
+        extra_kwargs = {'cover_url': {'required': False}}
 
     def create(self, validated_data):
+        cover_file    = validated_data.pop('cover_file', None)
         track_ids_raw = validated_data.pop('track_ids', [])
         user_id       = validated_data.pop('user_id')
 
@@ -192,6 +267,16 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
         user  = User.objects.get(id=user_id)
         album = Album.objects.create(user=user, **validated_data)
 
+        if cover_file:
+            try:
+                url, fid = _upload(cover_file, f"album_{album.id}_cover")
+                album.cover_url = url
+                album.cover_fileforge_id = fid
+                album.save(update_fields=['cover_url', 'cover_fileforge_id'])
+            except Exception as exc:
+                album.delete()
+                raise serializers.ValidationError(f"Cover upload failed: {exc}")
+
         if track_ids:
             Track.objects.filter(id__in=track_ids).update(album=album)
 
@@ -199,22 +284,33 @@ class CreateAlbumSerializer(serializers.ModelSerializer):
 
 
 class UpdateAlbumSerializer(serializers.ModelSerializer):
-    track_ids = serializers.JSONField(write_only=True, required=False)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    track_ids  = serializers.JSONField(write_only=True, required=False)
 
     class Meta:
         model  = Album
         fields = [
             'title', 'artist', 'description',
-            'cover_url', 'cover_gradient', 'release_date', 'genre',
+            'cover_url', 'cover_file', 'cover_gradient', 'release_date', 'genre',
             'published', 'track_ids',
         ]
+        extra_kwargs = {'cover_url': {'required': False}}
 
     def update(self, instance, validated_data):
+        cover_file    = validated_data.pop('cover_file', None)
         track_ids_raw = validated_data.pop('track_ids', None)
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if cover_file:
+            old_fid = instance.cover_fileforge_id
+            url, fid = _upload(cover_file, f"album_{instance.id}_cover")
+            _delete_from_fileforge(old_fid)
+            instance.cover_url = url
+            instance.cover_fileforge_id = fid
+            instance.save(update_fields=['cover_url', 'cover_fileforge_id'])
 
         if track_ids_raw is not None:
             if isinstance(track_ids_raw, str):
@@ -252,17 +348,24 @@ class TrackSerializer(serializers.ModelSerializer):
 
 
 class CreateTrackSerializer(serializers.ModelSerializer):
-    user_id = serializers.UUIDField(write_only=True)
-    tags    = serializers.JSONField(required=False)
+    user_id    = serializers.UUIDField(write_only=True)
+    audio_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+    tags       = serializers.JSONField(required=False)
 
     class Meta:
         model  = Track
         fields = [
             'user_id', 'title', 'artist', 'artist_slug', 'description',
-            'genre', 'mood', 'tags', 'audio_url', 'audio_file_size',
-            'audio_duration', 'audio_format', 'cover_url', 'cover_gradient',
+            'genre', 'mood', 'tags',
+            'audio_file', 'audio_url', 'audio_file_size', 'audio_duration', 'audio_format',
+            'cover_file', 'cover_url', 'cover_gradient',
             'waveform_data', 'bpm', 'key', 'published',
         ]
+        extra_kwargs = {
+            'audio_url': {'required': False},
+            'cover_url': {'required': False},
+        }
 
     def validate_audio_duration(self, value):
         if value is None or value <= 0:
@@ -272,8 +375,10 @@ class CreateTrackSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         from django.utils import timezone
 
-        user_id = validated_data.pop('user_id')
-        user    = User.objects.get(id=user_id)
+        user_id    = validated_data.pop('user_id')
+        audio_file = validated_data.pop('audio_file', None)
+        cover_file = validated_data.pop('cover_file', None)
+        user       = User.objects.get(id=user_id)
 
         if isinstance(validated_data.get('tags'), str):
             try:
@@ -284,21 +389,53 @@ class CreateTrackSerializer(serializers.ModelSerializer):
         if validated_data.get('published', False):
             validated_data['published_at'] = timezone.now()
 
-        return Track.objects.create(user=user, **validated_data)
+        track = Track.objects.create(user=user, **validated_data)
+
+        if audio_file:
+            try:
+                url, fid = _upload(audio_file, f"track_{track.id}_audio")
+                track.audio_url = url
+                track.audio_fileforge_id = fid
+                track.save(update_fields=['audio_url', 'audio_fileforge_id'])
+            except Exception as exc:
+                track.delete()
+                raise serializers.ValidationError(f"Audio upload failed: {exc}")
+
+        if cover_file:
+            try:
+                url, fid = _upload(cover_file, f"track_{track.id}_cover")
+                track.cover_url = url
+                track.cover_fileforge_id = fid
+                track.save(update_fields=['cover_url', 'cover_fileforge_id'])
+            except Exception as exc:
+                logger.warning("Cover upload failed for track %s: %s", track.id, exc)
+
+        return track
 
 
 class UpdateTrackSerializer(serializers.ModelSerializer):
+    audio_file = serializers.FileField(write_only=True, required=False, allow_null=True)
+    cover_file = serializers.ImageField(write_only=True, required=False, allow_null=True)
+
     class Meta:
         model  = Track
         fields = [
             'title', 'artist', 'artist_slug', 'description', 'genre', 'mood',
-            'tags', 'audio_url', 'audio_file_size', 'audio_duration',
-            'audio_format', 'cover_url', 'cover_gradient', 'waveform_data',
-            'bpm', 'key', 'published',
+            'tags',
+            'audio_file', 'audio_url', 'audio_file_size', 'audio_duration', 'audio_format',
+            'cover_file', 'cover_url', 'cover_gradient',
+            'waveform_data', 'bpm', 'key', 'published',
         ]
+        extra_kwargs = {
+            'audio_url': {'required': False},
+            'cover_url': {'required': False},
+        }
 
     def update(self, instance, validated_data):
         from django.utils import timezone
+
+        audio_file = validated_data.pop('audio_file', None)
+        cover_file = validated_data.pop('cover_file', None)
 
         if 'published' in validated_data and validated_data['published'] and not instance.published:
             instance.published_at = timezone.now()
@@ -312,6 +449,23 @@ class UpdateTrackSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
+
+        if audio_file:
+            old_fid = instance.audio_fileforge_id
+            url, fid = _upload(audio_file, f"track_{instance.id}_audio")
+            _delete_from_fileforge(old_fid)
+            instance.audio_url = url
+            instance.audio_fileforge_id = fid
+            instance.save(update_fields=['audio_url', 'audio_fileforge_id'])
+
+        if cover_file:
+            old_fid = instance.cover_fileforge_id
+            url, fid = _upload(cover_file, f"track_{instance.id}_cover")
+            _delete_from_fileforge(old_fid)
+            instance.cover_url = url
+            instance.cover_fileforge_id = fid
+            instance.save(update_fields=['cover_url', 'cover_fileforge_id'])
+
         return instance
 
 

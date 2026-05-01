@@ -24,6 +24,23 @@ from .serializers import (
 logger = logging.getLogger(__name__)
 
 
+# ─── FileForge cleanup helpers ─────────────────────────────────────────────────
+
+def _delete_fileforge_file(fileforge_id):
+    """Silently delete a file from FileForge by its numeric ID."""
+    if not fileforge_id:
+        return
+    from musewave.services.fileforge import delete_file
+    try:
+        delete_file(fileforge_id)
+    except Exception as exc:
+        logger.warning("Could not delete FileForge file %s: %s", fileforge_id, exc)
+
+
+def _delete_track_files(track):
+    """Delete a track's audio and cover files from FileForge."""
+    _delete_fileforge_file(track.audio_fileforge_id)
+    _delete_fileforge_file(track.cover_fileforge_id)
 
 
 # ============================================================================
@@ -244,6 +261,7 @@ def track_detail(request, track_id):
         return Response({'error': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     elif request.method == 'DELETE':
+        _delete_track_files(track)
         track.delete()
         return Response({'success': True})
 
@@ -252,6 +270,7 @@ def track_detail(request, track_id):
 def delete_track_method(request, track_id):
     """Separate DELETE endpoint (kept for URL compatibility)."""
     track = get_object_or_404(Track, id=track_id)
+    _delete_track_files(track)
     track.delete()
     return Response({'success': True})
 
@@ -499,6 +518,7 @@ def update_album(request, album_id):
 @api_view(['DELETE'])
 def delete_album(request, album_id):
     album = get_object_or_404(Album, id=album_id)
+    _delete_fileforge_file(album.cover_fileforge_id)
     Track.objects.filter(album=album).update(album=None)
     album.delete()
     return Response({'success': True})

@@ -183,6 +183,8 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
+        'rest_framework.parsers.MultiPartParser',
+        'rest_framework.parsers.FormParser',
     ],
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -303,6 +305,14 @@ LOGGING = {
 }
 
 APPEND_SLASH = False
+
+# ============================================================================
+# FILEFORGE — External file storage service
+# ============================================================================
+
+FILEFORGE_BASE_URL = os.getenv("FILEFORGE_BASE_URL", "https://fileforge1.pythonanywhere.com")
+# Replace with a real API key from the FileForge developer console.
+FILEFORGE_API_KEY  = os.getenv("FILEFORGE_API_KEY", "ffk_dummy_key_replace_me")
 
 # Security settings for production (PythonAnywhere)
 if not DEBUG:
