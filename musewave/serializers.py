@@ -23,7 +23,7 @@ def _upload(file_obj, filename):
     from musewave.services.fileforge import upload_file, FileForgeError
 
     try:
-        record = upload_file(file_obj, filename)
+        record = upload_file(file_obj, filename, provider="cloudinary")
     except FileForgeError as exc:
         raise serializers.ValidationError(f"File upload failed: {exc}")
 
